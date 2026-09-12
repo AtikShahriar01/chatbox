@@ -1,68 +1,147 @@
-# Chatbox — ফোল্ডার গাইড
+# Chatbox — A Local-First, Multi-Model AI Chat Client
 
-একটা local-first, multi-model AI chat client + built-in IDE + PC agent — সবকিছু
-এই ফোল্ডারের ভেতরেই (C: ড্রাইভে কিছু যায় না)।
+A private, all-in-one AI workspace that runs entirely on your own PC: chat with any
+model provider, a built-in code IDE with a live terminal, and an autonomous coding
+agent that acts on your machine — with production-grade security hardening. No cloud
+account, no data leaving your computer.
 
-## 🚀 চালু করবেন যেভাবে
+---
 
-| ফাইল | কাজ |
-|---|---|
-| **`start-app.bat`** | প্রতিদিনের ব্যবহার — শুধু এই PC থেকে (localhost) |
-| **`start-server.bat`** | LAN মোড — ফোন/অন্য ডিভাইস থেকে `http://<PC-IP>:3000` |
-| **`start-dev.bat`** | ডেভেলপমেন্ট (hot reload) — কোড বদলালেই আপডেট |
-| **`clean-cache.bat`** | এক ক্লিকে জমা ক্যাশ/লগ পরিষ্কার (~৬০০MB পর্যন্ত ফ্রি) |
+## Features
 
-ঠিকানা: `http://localhost:3000` · প্রথমবার PIN দিয়ে অ্যাকাউন্ট → তারপর লগইন।
-AI চালাতে: **Settings → Model Provider** → আপনার API key (OpenRouter/OpenAI/Claude/
-Gemini/Ollama — যেকোনো একটা)। Key শুধু আপনার ব্রাউজারেই থাকে।
+- **Multi-Model Chat**: OpenAI, Claude, Gemini, DeepSeek, Groq, Mistral, xAI, Cohere, OpenRouter, Ollama, LM Studio — bring your own key (BYOK), stream responses live.
+- **Built-in IDE**: Monaco editor, file explorer, persistent terminal sessions, git integration, and a live project dashboard — all inside the browser.
+- **Autonomous Coding Agent**: Give it a big task and watch a live to-do checklist tick off as it plans, writes files, runs commands, and self-verifies.
+- **PC Agent with Guardrails**: File/command access is confined to your chosen workspace, with an exec denylist, secret redaction, approval modes, and a full audit log.
+- **Local-First & Private**: The server binds to localhost (or your LAN only). Everything — chats, keys, sessions, caches — stays inside one folder. Nothing touches C: or the cloud.
+- **Cost & Usage Tracking**: Per-model token counts, USD/BDT cost, internal "usage value", monthly budget warnings.
+- **Portable Toolchain**: Ships its own Node.js and Python. Copy the folder to any Windows PC and run.
 
-## 📁 ফোল্ডার ম্যাপ
+---
+
+## Why Use Chatbox?
+
+- **Privacy by default** — your API keys and conversations never leave your machine.
+- **One folder, zero setup** — no installers; double-click a `.bat` and it runs.
+- **Security-first** — 5-layer defense-in-depth (network binding, origin/CSRF gates, server-side session auth, API guards, sandboxed PC bridge).
+- **Real tooling** — not just a chat UI: an actual IDE + agent that edits files and runs code on your PC, with checkpoints for rollback.
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- Windows 10/11 (the launchers are `.bat`; the toolchain is Windows-portable)
+- No other software needed — Node.js and Python are bundled in `tools/` and `.home/`
+
+### Installation
+
+1. **Clone or copy the folder** to any location (e.g. `D:\chatbox`):
+
+   ```bash
+   git clone https://github.com/AtikShahriar01/chatbox.git
+   ```
+
+2. **Start the app** — double-click one of:
+
+   | File | What it does |
+   |---|---|
+   | `start-app.bat` | Daily use — localhost only (most secure) |
+   | `start-server.bat` | LAN mode — open from your phone via `http://<PC-IP>:3000` |
+   | `start-dev.bat` | Development with hot reload |
+
+   On first run it auto-installs dependencies and builds the production bundle.
+
+3. **Open** http://localhost:3000 in your browser.
+
+4. **Create your PIN** on the login screen (server-side verified; 5 wrong tries → 5-min lock).
+
+5. **Add an API key** — Settings → Model Provider → paste your key (OpenRouter, OpenAI, etc.) or point the base URL at a local Ollama server (`http://localhost:11434/v1`, no key needed).
+
+---
+
+## Configuration Guide
+
+### Model Provider
+
+Set the **API Base URL**, **API Key**, and **Model** in Settings → Model Provider.
+The app auto-detects the provider protocol (OpenAI / Anthropic / Google / Cohere / Ollama)
+from the base URL and routes accordingly.
+
+### PC Agent & Workspace
+
+Open the IDE → **Change project folder** to pick the workspace. The agent can only
+read/write/run inside that folder. Choose a permission mode in PC Access:
+
+- **Ask** — every write/command needs your approval
+- **Safe** — reads auto, writes/commands ask
+- **Full Access** — everything automatic (use with care)
+
+### Portability
+
+Every script self-locates, so the folder works from any drive. Nothing is hardcoded to
+`H:`. To start fresh on a new machine, delete the `.auth/` folder (your PIN) and re-register.
+
+---
+
+## Project Structure
 
 ```
-H:\chatbot create\
-├── app\                ← Next.js অ্যাপ (চ্যাট + IDE + Console + API routes)
-│   ├── app\            ← পেজ ও API রুট
-│   ├── components\     ← UI কম্পোনেন্ট
-│   ├── lib\            ← স্টেট, providers, agent engine, security guard
-│   └── middleware.js   ← Host/Origin/session গেট (লেয়ার ১)
-├── agent-bridge\       ← PC bridge (localhost:8765) — ফাইল/কমান্ড/git/টার্মিনাল
-│   └── checkpoints\    ← rollback স্ন্যাপশট (মুছবেন না)
-├── tools\              ← পোর্টেবল Node.js (C: ছাড়াই সব চলে)
-├── .home\              ← পোর্টেবল Python + আপনার AppData/session/কুকি
-├── .auth\              ← লগইন PIN hash + সেশন সিক্রেট (গোপন — git-এ নেই)
-├── .selftest\          ← টেস্ট টুল: parser-tests, security-live-tests, mock-provider
-├── scripts\            ← check-env.sh (সব H:-তে লক আছে কিনা)
-├── docs\               ← SECURIT* ডক + মূল PRD/TRD/UIUX স্পেক
-├── .npm\ .npm-global\ .pip\ .tmp\   ← ক্যাশ/টেম্প (clean-cache.bat দিয়ে পরিষ্কার)
-├── env.sh / env.bat    ← "সব H:-এ থাকবে" এনভায়রনমেন্ট লক
-├── AGENTS.md           ← AI এজেন্টদের জন্য workspace নিয়ম
-└── start-*.bat, clean-cache.bat     ← লঞ্চার
+chatbox/
+├── app/                # Next.js app — pages, API routes, components, lib
+│   ├── app/            # routes: chat, ide, console, login + /api/*
+│   ├── components/     # UI (ChatPanel, IDE, TodoPanel, …)
+│   └── lib/            # state, providers, agent engine, security guard
+├── agent-bridge/       # local PC bridge server (files, exec, git, terminals)
+├── docs/               # security, audit, PRD/TRD/UIUX specs
+├── .selftest/          # parser + live security test suites
+├── scripts/            # check-env.sh
+├── tools/  .home/      # bundled portable Node.js + Python (gitignored)
+├── start-*.bat         # launchers
+└── clean-cache.bat     # one-click cache/log cleanup
 ```
 
-## 🔒 সিকিউরিটি (সংক্ষেপে)
+---
 
-৫ স্তরের দেয়াল: localhost/LAN-only binding → Host/Origin গেট → সার্ভার-সাইড PIN
-সেশন → API rate-limit/size-cap/op-whitelist → bridge token + path confinement +
-command denylist + audit log। বিস্তারিত: [docs/SECURITY.md](docs/SECURITY.md),
-অডিট: [docs/SECURITY_AUDIT.md](docs/SECURITY_AUDIT.md)।
+## Security
 
-## 🧪 টেস্ট
+Chatbox is built around defense-in-depth. See **[SECURITY.md](SECURITY.md)** and the
+full audit in **[docs/SECURITY_AUDIT.md](docs/SECURITY_AUDIT.md)**.
+
+- **Network**: server binds to localhost (or LAN in `start-server.bat`); Host allowlist blocks DNS rebinding.
+- **Auth**: server-side session (HttpOnly, SameSite=Strict, HMAC-signed cookie); PIN verified server-side.
+- **API**: same-origin + custom-header checks, per-route rate limits, body-size caps, strict bridge op-whitelist.
+- **PC bridge**: token never reaches the browser; path confinement, credential denylist, output secret-redaction, and a full audit log.
+- **Content**: AI output is markdown-sanitized and locked down by a strict Content-Security-Policy.
+
+---
+
+## Testing
 
 ```bash
-source env.sh
-node .selftest/parser-tests.mjs        # ১২টা SSE parser টেস্ট
-node .selftest/security-live-tests.mjs # ২৫টা লাইভ সিকিউরিটি টেস্ট (সার্ভার চালু থাকলে)
-bash scripts/check-env.sh               # সব ডেটা H:-তে লক আছে কিনা
+# SSE parser unit tests
+node .selftest/parser-tests.mjs
+
+# 25 live security tests (server + bridge running)
+node .selftest/security-live-tests.mjs
+
+# verify all data stays inside the folder
+bash scripts/check-env.sh
 ```
 
-## 📦 অন্য PC/ফোল্ডারে নেওয়া (১০০% পোর্টেবল)
+CI runs the build + parser tests on every push (see `.github/workflows/ci.yml`).
 
-ফোল্ডারটা কপি করে যেকোনো ড্রাইভ/মেশিনে (Windows) নিয়ে `start-app.bat` ডাবল-ক্লিক
-করলেই চলবে — কোনো ইনস্টলার লাগবে না:
+---
 
-- সব script **নিজের লোকেশন নিজে খুঁজে নেয়** (H:/D:/USB — কোনো drive-এর নাম হার্ডকোড করা নেই)
-- নতুন মেশিনে `node_modules` না থাকলে bat ফাইল **নিজে npm install** করে নেয়
-- পুরনো path-এ সেট করা workspace থাকলে bridge **নতুন ফোল্ডারে ফিরে আসে** (auto-heal)
-- চ্যাট/সেটিংস ব্রাউজার localStorage-এ — নতুন PC-তে চাইলে Settings → Data → Export/Import
-- **ফ্রেশ শুরু করতে চাইলে:** `.auth\` ফোল্ডার মুছে দিন (নিজের PIN নিজে বানাবেন)
-- লক্ষ্য: Windows → Windows। Linux/Mac-এ নিলে `node_modules` আবার ইনস্টল করতে হবে
+## Contributing
+
+Issues and pull requests are welcome. For security-sensitive changes, follow
+[docs/SECURITY-DIRECTIVE.md](docs/SECURITY-DIRECTIVE.md) and run the security test
+suite before opening a PR.
+
+---
+
+## License
+
+This project is licensed under the **MIT License** — see [LICENSE](LICENSE).
