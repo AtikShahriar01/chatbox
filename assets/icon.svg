@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="130" height="130" viewBox="0 0 130 130" role="img" aria-label="Chatbox logo">
+  <defs>
+    <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2f6feb"/>
+      <stop offset="1" stop-color="#9333ea"/>
+    </linearGradient>
+  </defs>
+  <rect width="130" height="130" rx="30" fill="url(#lg)"/>
+  <path d="M35 45 h60 a12 12 0 0 1 12 12 v26 a12 12 0 0 1 -12 12 h-34 l-20 16 v-16 a12 12 0 0 1 -12 -12 v-26 a12 12 0 0 1 12 -12 z" fill="#ffffff"/>
+  <circle cx="52" cy="69" r="4.5" fill="#2f6feb"/>
+  <circle cx="68" cy="69" r="4.5" fill="#2f6feb"/>
+  <circle cx="84" cy="69" r="4.5" fill="#2f6feb"/>
+</svg>
