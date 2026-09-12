@@ -1,0 +1,275 @@
+LOCAL AI AGENT PLATFORM — PRD
+Version: 1.0
+Date: 2026-09-08
+
+1. PRODUCT OVERVIEW
+A browser-based AI development and computer automation platform powered by a Local Agent running on the user's PC. The browser provides the main interface while the Local Agent securely executes approved actions on the PC.
+
+Core architecture:
+Browser UI → Backend/API → AI/LLM → Agent Orchestrator → Local Agent → PC tools/resources
+
+2. PRODUCT VISION
+Provide a ZCode-style experience where a user can describe a task in natural language and an AI agent can plan, inspect, modify, test, and complete work on the user's local computer with controlled permissions.
+
+3. GOALS
+- Browser-first professional interface.
+- Secure local execution.
+- AI-assisted software development.
+- File, terminal, Git and browser automation.
+- Optional computer/UI automation.
+- Transparent task/activity visibility.
+- Human approval for risky actions.
+- Provider/model abstraction.
+- Extensible tool system.
+- Production-ready security and auditability.
+
+4. TARGET USERS
+- Developers and students.
+- AI-assisted software builders.
+- Technical teams.
+- Automation users.
+- Advanced power users.
+
+5. CORE USER FLOW
+1. User signs in.
+2. User installs/runs Local Agent.
+3. Agent authenticates with the account.
+4. User creates/selects a workspace/project.
+5. User gives a task.
+6. AI analyzes requirements and creates a plan.
+7. Agent requests required permissions.
+8. User approves or rejects sensitive operations.
+9. Agent executes tools locally.
+10. Results/errors are returned to the AI.
+11. AI iterates until the task is complete or blocked.
+12. User reviews changes, logs and final result.
+
+6. CORE FEATURES
+
+6.1 Authentication
+- Email/password or supported OAuth.
+- Session management.
+- Device/agent registration.
+- Secure token rotation.
+- Logout/revocation.
+
+6.2 Dashboard
+- Projects.
+- Recent tasks.
+- Agent connection status.
+- Recent activity.
+- Usage overview.
+- Notifications.
+
+6.3 Workspace/Project
+- Create/import project.
+- Local workspace mapping.
+- Project settings.
+- Environment variables metadata without exposing secrets.
+- Git status.
+- Agent association.
+
+6.4 AI Chat/Agent Console
+- Natural-language task input.
+- Conversation history.
+- Streaming responses.
+- Plan display.
+- Tool-call visibility.
+- Task status.
+- Stop/pause/resume.
+- Retry/recover.
+
+6.5 File Operations
+- Read files.
+- Create files.
+- Edit files.
+- Rename/move.
+- Create folders.
+- Delete with permission controls.
+- Diff/patch preview.
+- Search files.
+- Ignore sensitive files by policy.
+
+6.6 Terminal
+- Command execution.
+- Working-directory control.
+- Environment isolation.
+- Output streaming.
+- Timeout.
+- Process cancellation.
+- Command policy/allowlist.
+- Approval for dangerous commands.
+
+6.7 Browser Automation
+- Open URL.
+- Navigate.
+- Click/type/select.
+- Extract page data.
+- Screenshots.
+- Tab/session management.
+- Domain permission policies.
+
+6.8 Computer Automation
+- Screen capture.
+- Mouse actions.
+- Keyboard actions.
+- Window/application interaction.
+- Explicit permission required.
+- Emergency stop.
+
+6.9 Agent Planning
+- Task decomposition.
+- Dependency tracking.
+- Tool selection.
+- Execution loop.
+- Failure recovery.
+- Maximum-step limits.
+- User approval checkpoints.
+
+6.10 Git
+- Status/diff.
+- Branch operations.
+- Commit.
+- Pull/push subject to permissions.
+- Optional GitHub integration.
+- Review before commit/push.
+
+6.11 Logs
+- Agent events.
+- Tool calls.
+- Commands.
+- Errors.
+- Approval events.
+- Security events.
+- Timestamps and task IDs.
+
+6.12 Usage
+- Token usage.
+- Model/provider usage.
+- Task execution metrics.
+- Cost calculation.
+- Free-model usage tracking.
+
+7. PERMISSION MODEL
+Permissions must be granular:
+- Workspace read
+- Workspace write
+- File delete
+- Terminal execution
+- Network access
+- Browser automation
+- Computer control
+- Git write
+- Git push
+- Secret/environment access
+
+Default policy: least privilege.
+
+8. SECURITY REQUIREMENTS
+- Local Agent must authenticate.
+- Use short-lived credentials where possible.
+- Encrypt network traffic.
+- Never expose provider API keys to the browser.
+- Never log secrets.
+- Restrict filesystem scope.
+- Restrict commands.
+- Validate tool arguments.
+- Require approval for high-risk operations.
+- Maintain immutable-style audit records.
+- Agent must support emergency stop.
+- Protect against prompt injection from files/web content.
+- Separate untrusted tool output from system instructions.
+- Apply rate limits and abuse controls.
+
+9. NON-FUNCTIONAL REQUIREMENTS
+Performance:
+- Responsive streaming UI.
+- Low-latency agent heartbeat.
+- Efficient file transfer.
+- Bounded output sizes.
+
+Reliability:
+- Reconnect after temporary network failure.
+- Recover task state.
+- Idempotent operations where possible.
+- Graceful agent shutdown.
+
+Scalability:
+- Stateless API where practical.
+- Queue/event architecture for long-running tasks.
+- Pluggable model providers.
+- Multiple agents per account.
+
+10. MVP
+MVP includes:
+- Authentication
+- Agent registration
+- Dashboard
+- Workspace/project
+- AI chat
+- File read/write
+- Terminal
+- Plan/execution loop
+- Approval system
+- Activity logs
+- Basic Git
+- Agent online/offline state
+
+11. PHASE 2
+- Browser automation
+- Advanced GitHub integration
+- Computer control
+- Multi-agent tasks
+- Persistent memory
+- Advanced recovery
+- Team workspaces
+- Usage/billing
+
+12. PHASE 3
+- Plugin/tool marketplace
+- Advanced sandboxing
+- Distributed agents
+- Enterprise policies
+- Advanced analytics
+- Agent-to-agent workflows
+
+13. ADMIN
+- Users
+- Agents
+- Projects
+- Provider configuration
+- Model routing
+- Usage
+- Security events
+- Audit logs
+- Feature flags
+- System health
+
+14. ACCEPTANCE CRITERIA
+A task is considered successful when:
+- Required permissions were granted.
+- Agent completed planned operations.
+- No unapproved restricted operation occurred.
+- Tests/checks configured for the project pass or failures are clearly reported.
+- Changes and activity are reviewable.
+- Final response accurately summarizes the result and remaining issues.
+
+15. SUCCESS METRICS
+- Task completion rate.
+- Agent reconnection rate.
+- Tool failure rate.
+- Median task completion time.
+- User approval/rejection rate.
+- Crash/error rate.
+- Security incident rate.
+- User retention and active projects.
+
+16. OUT OF SCOPE FOR MVP
+- Unrestricted remote PC access.
+- Hidden/background actions without user visibility.
+- Storing plaintext API keys.
+- Arbitrary public access to a user's local agent.
+- Unbounded autonomous execution.
+
+17. PRODUCT PRINCIPLE
+The platform should be powerful enough to automate real development workflows while maintaining user visibility, explicit permissions, isolation, auditability and an emergency stop.

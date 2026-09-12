@@ -1,0 +1,306 @@
+PREMIUM WEB APP UI/UX DESIGN MASTER SPECIFICATION
+Product: Local AI Agent Platform / ZCode-style AI Development Agent
+Version: 1.0
+
+PURPOSE
+Use this TXT as the source of truth for the web application's UI/UX. Build a premium, professional, smooth developer platform — NOT a generic AI chatbot.
+
+PRODUCT EXPERIENCE
+The web app is a browser-based control center for a Local AI Agent running on the user's PC. It should feel like a refined combination of a modern AI workspace, professional IDE, terminal, agent control center, and SaaS dashboard.
+
+DESIGN GOALS
+- Premium, professional and trustworthy.
+- Fast and smooth interaction.
+- Clear information hierarchy.
+- Developer-focused but easy for beginners to understand.
+- Responsive on desktop, tablet and mobile.
+- Accessible and production-ready.
+- Subtle, purposeful animations only.
+- Always make agent state, task progress, permissions and changes visible.
+
+VISUAL LANGUAGE
+- Primary dark theme with polished light theme option.
+- Neutral surfaces, subtle borders and restrained shadows.
+- Excellent typography and consistent spacing.
+- Subtle gradients only when useful.
+- Minimal visual noise.
+- Modern SaaS + IDE aesthetic.
+- Avoid excessive glassmorphism, neon, huge gradients, 3D decoration, cartoon AI graphics and distracting backgrounds.
+
+DESIGN TOKENS
+Create centralized semantic tokens for background, panels, elevated surfaces, text, borders, focus, primary actions, hover/active states, success, warning, error, info, spacing, radius, shadows and motion. Never scatter random colors/spacing throughout the UI.
+
+TYPOGRAPHY
+Use Inter, Geist, IBM Plex Sans or equivalent professional UI font. Use JetBrains Mono, IBM Plex Mono or equivalent for code and terminal.
+
+GLOBAL LAYOUT
+Desktop:
+Sidebar | Main Workspace
+
+Sidebar contains product logo, workspace/project switcher, navigation, agent status and profile.
+Main contains contextual header and page content.
+Sidebar must collapse.
+Tablet uses compact/drawer panels. Mobile uses drawer or bottom navigation.
+
+PRIMARY NAVIGATION
+Dashboard
+Projects
+Agent
+Tasks
+Conversations
+Git
+Usage
+Settings
+Optional: Notifications, Help, Keyboard Shortcuts.
+
+DASHBOARD
+Immediately show:
+- Local Agent online/offline state.
+- Current project.
+- Active task.
+- Recent projects.
+- Active/recent tasks.
+- Usage summary.
+- Recent activity.
+- Security alerts.
+- Quick actions.
+The dashboard is a productivity launchpad, not a generic analytics page.
+
+PROJECT WORKSPACE — CORE SCREEN
+Use an IDE-inspired multi-panel layout:
+
+Top Context Bar
+File Tree | AI Chat / Code Editor | Agent Inspector
+Terminal / Logs
+
+Panels must support resize, collapse, expand, fullscreen and restore-default-layout. Remember user panel preferences where possible.
+
+TOP CONTEXT BAR
+Show project name, Git branch, Local Agent status, current task, search, command palette, notifications and profile. Keep compact.
+
+FILE EXPLORER
+Provide folder tree, search, new file/folder, rename, delete, context menu, Git status and protected-file indicators. Sensitive files such as .env, credentials and SSH keys must have security indicators and must not be unnecessarily exposed.
+
+CODE EDITOR
+Use Monaco Editor or equivalent.
+Features: tabs, syntax highlighting, line numbers, search/replace, folding, diagnostics, optional minimap, diff viewer, unsaved state, read-only mode and accept/reject/revert changes.
+AI changes must be reviewable. Never silently overwrite important files.
+
+AI AGENT CHAT
+The chat must feel like an agent console rather than a normal chatbot.
+Composer: prompt, context/attachments, project context, task mode, send and stop.
+Message types: user request, concise AI action summary, plan, tool execution, approval request, error, test result and final result.
+Never expose hidden chain-of-thought. Show concise action summaries such as “Inspecting authentication flow”, “Reading relevant files”, “Running tests”, “Waiting for approval”.
+
+TASK PLAN
+For complex tasks show an execution plan with status, duration and expandable details.
+Example:
+✓ Inspect routing
+✓ Inspect auth middleware
+→ Modify redirect handling
+○ Run tests
+○ Review changes
+
+AGENT STATUS
+Always show one of:
+ONLINE, CONNECTING, RECONNECTING, OFFLINE, PAUSED, BUSY, WAITING FOR APPROVAL, ERROR.
+Use status dot plus text; do not rely only on color.
+Clicking status opens device, version, permissions, current task, heartbeat and revoke/disconnect controls.
+
+APPROVAL EXPERIENCE
+Sensitive actions require explicit approval.
+Show exact action, target/resource, reason, risk and potential impact.
+Buttons: Allow Once, Allow for This Task, Deny.
+Dangerous operations require stronger warning. Never hide the command/resource.
+
+TERMINAL
+Bottom panel with multiple terminals, new terminal, working directory, streaming output, search, copy, clear, stop process and fullscreen.
+Show command status clearly. Commands requiring approval must indicate it.
+
+LIVE ACTIVITY
+Provide a compact timeline with timestamp, agent connection, task start, file reads, modifications, tests and results. Allow technical details to expand.
+
+DIFF / CHANGE REVIEW
+Show changed-file count and per-file additions/removals/modified sections.
+Actions: Accept, Reject, Revert, Open in Editor.
+Never bury changes inside chat.
+
+BROWSER AUTOMATION
+If enabled, provide browser panel with URL, title, tabs, status, current action and screenshot/page preview. Never expose private cookies or credentials.
+
+COMPUTER CONTROL
+If PC GUI automation is enabled, show a clear “Computer Control Active” state, current application, screenshot preview, action summary and Emergency Stop. User must always know when computer automation is active.
+
+TASKS PAGE
+Tabs: Active, Completed, Failed, Cancelled.
+Each task shows title, project, agent, status, duration, created time and result.
+Filters: project, status, date, agent.
+
+GIT UI
+Show branch, changed files, diff, commit, push, pull and branch management. Use review-before-commit. Push must be explicit.
+
+SETTINGS
+Account, Agent, Permissions, Projects, AI Providers, Models, Git, Browser Automation, Computer Control, Security, Notifications and Usage. Settings should be searchable.
+
+PERMISSION CENTER
+Permissions:
+- Workspace Read
+- Workspace Write
+- File Delete
+- Terminal
+- Network
+- Browser
+- Computer Control
+- Git Write
+- Git Push
+- Secret Access
+For each show enabled state, risk, description, scope and last-used information. Default to least privilege.
+
+SECURITY UX
+Show agent connection, recent sensitive actions, permission changes, security events, revoked sessions and Emergency Stop. Never display API keys, passwords, OAuth secrets or private credentials.
+
+LOADING STATES
+Never show unexplained blank screens. Use skeletons, contextual progress and streaming indicators. Avoid excessive spinners.
+
+EMPTY STATES
+Every empty state explains what is missing, why it matters and the next action. Example: “No projects yet — Create your first project to start working with the Local Agent.”
+
+ERROR STATES
+Errors must be actionable. Example: “Local Agent connection failed. The agent stopped responding. [Reconnect] [View Details]”.
+
+OFFLINE / RECONNECTING
+If the agent disconnects, show “Local Agent disconnected. Tasks are paused.” with Reconnect and Agent Settings. The rest of the web app should remain usable when possible.
+
+COMMAND PALETTE
+Ctrl/Cmd + K. Commands include open project, search files, start task, stop task, open terminal, Git status, settings, toggle panels and change theme. Must feel instant.
+
+KEYBOARD SHORTCUTS
+Ctrl/Cmd+K: command palette
+Ctrl/Cmd+P: quick file open
+Ctrl/Cmd+Shift+P: command search
+Ctrl/Cmd+Enter: send/run task
+Esc: close/cancel
+Ctrl/Cmd+`: toggle terminal
+Provide a shortcut reference screen.
+
+RESPONSIVE DESIGN
+Desktop is primary. Tablet uses collapsible/resizable panels. Mobile prioritizes dashboard, AI chat, tasks, approvals, agent status and notifications. Do not force the full desktop IDE onto mobile; editor and terminal may open as focused full-screen views.
+
+MOTION
+Use subtle 120–200ms micro-interactions and 200–300ms panel transitions. Use opacity/transform transitions and smooth expand/collapse. Avoid bouncing, huge transitions and continuously moving backgrounds. Respect prefers-reduced-motion.
+
+PREMIUM MICRO-INTERACTIONS
+Add restrained feedback for button hover, panel focus, sidebar collapse, agent status, file selection, diff changes, task progress, approval requests, copy and save actions.
+
+ACCESSIBILITY
+Target WCAG 2.2 AA. Support keyboard navigation, visible focus, proper contrast, semantic HTML, screen-reader labels, accessible dialogs/tooltips and reduced-motion. Never rely only on color.
+
+PERFORMANCE UX
+Keep UI responsive during long agent tasks. Use lazy loading for heavy panels, virtualized large logs/file lists, streaming AI responses, streaming terminal output, debounced search, cached metadata and efficient state management.
+
+REUSABLE DESIGN SYSTEM COMPONENTS
+Button, IconButton, Input, Textarea, Select, Dropdown, Tabs, Badge, Tooltip, Modal, Drawer, Toast, Alert, Card, Table, CommandPalette, Sidebar, Header, FileTree, CodeEditor, DiffViewer, Terminal, ChatMessage, AgentStatus, TaskPlan, TaskStep, ApprovalCard, ActivityTimeline, PermissionCard, NotificationCenter, EmptyState, ErrorState, Skeleton and ProgressIndicator.
+All components must use the same design tokens.
+
+REQUIRED PAGES
+1. Login
+2. Register
+3. Forgot Password
+4. Dashboard
+5. Projects
+6. Project Workspace
+7. Tasks
+8. Task Details
+9. Conversations
+10. Agent Management
+11. Agent Details
+12. Git
+13. Usage
+14. Notifications
+15. Settings
+16. Permissions
+17. Security
+18. AI Provider/Model Settings
+
+AUTH UX
+Simple login with email/password and optional OAuth. After login go to Dashboard. If no Local Agent is connected, start guided onboarding.
+
+LOCAL AGENT ONBOARDING
+1. Welcome
+2. Install Local Agent
+3. Launch Agent
+4. Authenticate/link device
+5. Choose workspace
+6. Configure permissions
+7. Connection test
+8. Ready
+Keep technical complexity hidden until needed.
+
+FIRST PROJECT EXPERIENCE
+After connection offer:
+- Select local folder
+- Import Git repository
+- Open existing workspace
+Then offer a simple demonstration task such as “Analyze this project and tell me what it does.”
+
+TASK CONTROL
+Every running task provides Pause, Resume, Stop, View Activity and View Changes. Stop must be easy to find. After stopping show “Task stopped by user.” Never silently continue.
+
+FINAL TASK RESULT
+Use a structured completion card:
+TASK COMPLETED
+Summary
+Files changed
+Tests
+Git status
+Actions: Review Changes / Open Diff / Run Again
+
+VISUAL HIERARCHY
+Priority:
+1. Current task/status
+2. Main work area
+3. Important actions
+4. Agent state
+5. Secondary information
+6. Technical details
+Decorative UI must never compete with task information.
+
+DO NOT DO
+- Do not build a generic ChatGPT clone.
+- Do not use excessive glassmorphism or neon.
+- Do not use giant gradients everywhere.
+- Do not add meaningless charts.
+- Do not hide important actions, terminal activity or permissions.
+- Do not execute destructive actions without approval.
+- Do not let animation make the UI slow.
+- Do not use inconsistent component styles.
+- Do not ignore loading/error/offline states.
+- Do not expose secrets.
+- Do not make users guess what the agent is doing.
+- Do not remove useful functionality just to simplify the UI.
+
+IMPLEMENTATION INSTRUCTIONS FOR THE AI
+1. Read the complete specification before implementation.
+2. Inspect the existing project before changing it.
+3. Preserve existing business logic unless changes are necessary.
+4. Create centralized design tokens.
+5. Build reusable components.
+6. Implement desktop workspace first.
+7. Implement responsive behavior.
+8. Implement loading, empty, error and offline states.
+9. Add restrained smooth motion.
+10. Address accessibility.
+11. Never expose secrets.
+12. Connect UI to real backend/agent state where APIs exist.
+13. If APIs do not exist, create clean typed interfaces/adapters instead of fake production behavior.
+14. Avoid unnecessary dependencies.
+15. Test complete user flows.
+16. Perform a visual consistency review before completion.
+
+DEFINITION OF DONE
+The design/implementation is complete only when navigation, dashboard, project workspace, streaming-ready AI chat, task plan, tool activity, approval flow, terminal, file explorer, editor/diff, agent status, offline/reconnect, error/empty states, responsive behavior, keyboard shortcuts and accessibility all work cohesively.
+
+FINAL QUALITY TARGET
+The finished web app must feel like a serious premium AI developer platform. A user should be able to open the browser, connect the Local Agent, select a project, describe a task, watch the agent plan and execute work on the PC, approve sensitive actions, review changes, run tests, and understand the complete task state without confusion.
+
+Prioritize smooth workflow, clarity, speed, trust, security and professional visual quality.

@@ -1,0 +1,316 @@
+LOCAL AI AGENT PLATFORM — BACKEND & DATABASE SCHEMA
+Version: 1.0
+Date: 2026-09-08
+
+1. DATABASE
+Primary database: PostgreSQL.
+
+Use UUID primary keys.
+Use UTC timestamps.
+Use created_at and updated_at on mutable entities.
+Use soft deletion only where business requirements justify it.
+
+2. USERS
+users
+- id UUID PK
+- email UNIQUE
+- password_hash nullable
+- display_name
+- status
+- email_verified_at
+- created_at
+- updated_at
+
+3. SESSIONS
+sessions
+- id UUID PK
+- user_id FK users.id
+- refresh_token_hash
+- expires_at
+- revoked_at
+- created_at
+
+4. AGENTS
+agents
+- id UUID PK
+- user_id FK users.id
+- name
+- device_name
+- platform
+- agent_version
+- status
+- last_seen_at
+- revoked_at
+- created_at
+- updated_at
+
+5. AGENT_SESSIONS
+agent_sessions
+- id UUID PK
+- agent_id FK agents.id
+- connection_id
+- connected_at
+- disconnected_at
+- ip_hash or privacy-safe network metadata
+- created_at
+
+6. WORKSPACES
+workspaces
+- id UUID PK
+- owner_id FK users.id
+- name
+- description
+- created_at
+- updated_at
+
+7. PROJECTS
+projects
+- id UUID PK
+- workspace_id FK workspaces.id
+- name
+- local_path_alias
+- repository_url nullable
+- default_branch nullable
+- created_at
+- updated_at
+
+Do not store raw sensitive local filesystem paths unless required.
+
+8. PROJECT_MEMBERS
+project_members
+- id UUID PK
+- project_id FK projects.id
+- user_id FK users.id
+- role
+- created_at
+
+9. TASKS
+tasks
+- id UUID PK
+- project_id FK projects.id
+- user_id FK users.id
+- agent_id FK agents.id nullable
+- title
+- prompt
+- status
+- risk_level
+- started_at
+- completed_at
+- cancelled_at
+- error_code nullable
+- created_at
+- updated_at
+
+10. TASK_STEPS
+task_steps
+- id UUID PK
+- task_id FK tasks.id
+- step_index
+- title
+- description
+- status
+- started_at
+- completed_at
+- created_at
+
+11. CONVERSATIONS
+conversations
+- id UUID PK
+- project_id FK projects.id nullable
+- user_id FK users.id
+- title
+- created_at
+- updated_at
+
+12. MESSAGES
+messages
+- id UUID PK
+- conversation_id FK conversations.id
+- role
+- content
+- model_id nullable
+- token_input nullable
+- token_output nullable
+- created_at
+
+Avoid storing secrets in message content.
+
+13. TOOL_CALLS
+tool_calls
+- id UUID PK
+- task_id FK tasks.id
+- step_id FK task_steps.id nullable
+- agent_id FK agents.id
+- tool_name
+- input_json
+- output_json nullable
+- status
+- risk_level
+- started_at
+- completed_at
+- error_code nullable
+- created_at
+
+Sensitive input/output should be redacted before storage.
+
+14. APPROVALS
+approvals
+- id UUID PK
+- task_id FK tasks.id
+- tool_call_id FK tool_calls.id
+- requested_by
+- risk_level
+- summary
+- status
+- decided_by nullable
+- decided_at nullable
+- expires_at
+- created_at
+
+15. AUDIT_LOGS
+audit_logs
+- id UUID PK
+- user_id nullable
+- agent_id nullable
+- task_id nullable
+- action
+- resource_type
+- resource_id
+- metadata_json
+- created_at
+
+Audit records should be append-only from the application perspective.
+
+16. PROVIDERS
+providers
+- id UUID PK
+- name
+- slug UNIQUE
+- status
+- config_json
+- created_at
+- updated_at
+
+Never store plaintext provider secrets in normal application tables.
+
+17. MODELS
+models
+- id UUID PK
+- provider_id FK providers.id
+- model_key
+- display_name
+- context_limit
+- input_price
+- output_price
+- status
+- created_at
+- updated_at
+
+18. USAGE_RECORDS
+usage_records
+- id UUID PK
+- user_id FK users.id
+- task_id nullable
+- model_id nullable
+- input_tokens
+- output_tokens
+- estimated_cost
+- currency
+- created_at
+
+19. GIT_CONNECTIONS
+git_connections
+- id UUID PK
+- user_id FK users.id
+- provider
+- external_account_id
+- encrypted_credential_reference
+- created_at
+- revoked_at
+
+Do not store raw OAuth tokens in ordinary plaintext fields.
+
+20. NOTIFICATIONS
+notifications
+- id UUID PK
+- user_id FK users.id
+- type
+- title
+- body
+- read_at
+- created_at
+
+21. SECURITY_EVENTS
+security_events
+- id UUID PK
+- user_id nullable
+- agent_id nullable
+- severity
+- event_type
+- description
+- metadata_json
+- created_at
+
+22. IMPORTANT INDEXES
+Index:
+- sessions.user_id
+- agents.user_id
+- agents.status
+- projects.workspace_id
+- tasks.project_id
+- tasks.user_id
+- tasks.status
+- task_steps.task_id
+- messages.conversation_id
+- tool_calls.task_id
+- approvals.task_id
+- audit_logs.user_id
+- audit_logs.task_id
+- usage_records.user_id
+- security_events.severity
+
+23. DATA RELATIONSHIP
+User
+ ├── Sessions
+ ├── Agents
+ ├── Workspaces
+ │    └── Projects
+ │         ├── Members
+ │         └── Tasks
+ │              ├── Steps
+ │              ├── Tool Calls
+ │              └── Approvals
+ ├── Conversations
+ │    └── Messages
+ ├── Usage
+ ├── Notifications
+ └── Security Events
+
+24. BACKEND API GROUPS
+/auth
+/users
+/agents
+/workspaces
+/projects
+/tasks
+/conversations
+/tools
+/approvals
+/git
+/providers
+/models
+/usage
+/notifications
+/security
+
+Realtime:
+WebSocket / realtime gateway for agent/task events.
+
+25. SECURITY DATABASE RULES
+- Encrypt sensitive data.
+- Hash passwords with a modern password hashing algorithm.
+- Never store raw API keys in logs.
+- Redact secrets from tool output.
+- Enforce tenant/user ownership at every query boundary.
+- Use database constraints and application authorization together.
+- Maintain audit records for security-sensitive operations.

@@ -1,0 +1,45 @@
+{
+  "name": "chatbox-clone",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-search": "^0.16.0",
+    "@xterm/xterm": "^6.0.0",
+    "cmdk": "^1.1.1",
+    "diff": "^9.0.0",
+    "docx": "^9.7.1",
+    "exceljs": "^4.4.0",
+    "fuse.js": "^7.5.0",
+    "highlight.js": "^11.10.0",
+    "lucide-react": "^0.453.0",
+    "motion": "^12.43.0",
+    "next": "^14.2.35",
+    "pptxgenjs": "^4.0.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-dropzone": "^20.1.1",
+    "react-markdown": "^9.0.1",
+    "react-virtuoso": "^4.18.12",
+    "rehype-highlight": "^7.0.0",
+    "rehype-sanitize": "^6.0.0",
+    "remark-gfm": "^4.0.0",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.5.28",
+    "tailwindcss": "^3.4.14",
+    "typescript": "^5"
+  }
+}

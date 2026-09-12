@@ -1,0 +1,14 @@
+{
+  "name": "Chatbox Clone",
+  "short_name": "Chatbox",
+  "description": "A local-first, multi-model AI chat client. BYOK, streaming, multiple providers.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f1115",
+  "theme_color": "#2f6feb",
+  "orientation": "any",
+  "icons": [
+    { "src": "/icon-192.svg", "sizes": "192x192", "type": "image/svg+xml" },
+    { "src": "/icon-512.svg", "sizes": "512x512", "type": "image/svg+xml" }
+  ]
+}

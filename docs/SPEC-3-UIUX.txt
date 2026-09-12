@@ -1,0 +1,222 @@
+LOCAL AI AGENT PLATFORM — UI/UX DESIGN SPECIFICATION
+Version: 1.0
+Date: 2026-09-08
+
+1. DESIGN DIRECTION
+Style:
+- Premium developer-tool aesthetic.
+- Clean dark/light themes.
+- Dense but readable information architecture.
+- Professional IDE-inspired layout.
+- Strong status visibility.
+- Minimal unnecessary decoration.
+
+2. PRIMARY NAVIGATION
+Left sidebar:
+- Dashboard
+- Projects
+- Agent
+- Tasks
+- Conversations
+- Git
+- Usage
+- Settings
+
+Bottom:
+- Agent status
+- User profile
+
+3. DASHBOARD
+Sections:
+- Welcome/header
+- Agent connection card
+- Active tasks
+- Recent projects
+- Recent activity
+- Usage summary
+- Security alerts
+
+Agent status must clearly show:
+ONLINE / CONNECTING / OFFLINE / NEEDS APPROVAL
+
+4. PROJECT WORKSPACE
+Three/four-panel IDE-style layout:
+Left: File tree
+Center: Editor/Chat
+Right: Agent/task inspector
+Bottom: Terminal
+
+Responsive behavior:
+- Panels become tabs/drawers on smaller screens.
+- Terminal can expand full width.
+- Chat remains accessible.
+
+5. AI CHAT
+Components:
+- Message list
+- Composer
+- Attach/context button
+- Model selector if enabled
+- Task mode selector
+- Stop button
+- Streaming indicator
+
+AI messages may contain:
+- Plan
+- Tool activity
+- Diff summary
+- Test result
+- Warning
+- Final result
+
+6. TASK PLAN UI
+Show:
+Step 1 — Inspect project
+Step 2 — Identify issue
+Step 3 — Modify files
+Step 4 — Run tests
+Step 5 — Review changes
+
+Each step has:
+- Status
+- Duration
+- Tool count
+- Expandable details
+
+7. APPROVAL MODAL
+Must clearly explain:
+- What will happen
+- Exact resource
+- Command/action
+- Why it is needed
+- Risk level
+- Allow once
+- Allow for task
+- Deny
+
+High-risk actions should have stronger visual warning and require deliberate confirmation.
+
+8. FILE EXPLORER
+- Search
+- Tree navigation
+- File type icons
+- Git status indicators
+- Context menu
+- Protected-file indicator
+
+9. CODE EDITOR
+- Monaco-style editor.
+- Tabs.
+- Syntax highlighting.
+- Search/replace.
+- Inline diagnostics.
+- Diff mode.
+- Revert change.
+- Save state.
+
+10. TERMINAL
+- Multiple tabs.
+- Command/output separation.
+- Running process indicator.
+- Stop process.
+- Copy/search.
+- Clear.
+- Working directory indicator.
+- Security warning when command requires approval.
+
+11. AGENT PANEL
+Show:
+- Agent name
+- Device
+- Connection
+- Version
+- Last heartbeat
+- Current task
+- Permissions
+- CPU/memory status where available
+- Disconnect/revoke controls
+
+12. ACTIVITY TIMELINE
+Each event:
+Timestamp
+Actor
+Action
+Resource
+Result
+Risk
+Task ID
+
+13. SETTINGS
+Categories:
+- Account
+- Agent
+- Permissions
+- Workspace
+- AI providers
+- Models
+- Git
+- Browser automation
+- Computer control
+- Security
+- Notifications
+- Usage
+
+14. UX RULES
+- Never hide important automation actions.
+- Always show current task state.
+- Make destructive actions reversible where possible.
+- Use progressive disclosure.
+- Keep approval language explicit.
+- Preserve context when switching panels.
+- Provide clear error recovery.
+- Keyboard shortcuts for power users.
+- Accessibility target: WCAG 2.2 AA.
+
+15. RESPONSIVE DESIGN
+Desktop:
+Full IDE layout.
+
+Tablet:
+Collapsible side panels.
+
+Mobile:
+Dashboard/chat/approval focused.
+Complex code editing and terminal can be simplified.
+
+16. DESIGN SYSTEM
+Define:
+- Typography scale
+- Spacing scale
+- Radius
+- Elevation
+- Icon set
+- Buttons
+- Inputs
+- Tabs
+- Modals
+- Toasts
+- Badges
+- Tables
+- Code blocks
+- Diff viewer
+- Status indicators
+
+17. UX STATES
+Every major component must have:
+- Loading
+- Empty
+- Success
+- Error
+- Offline
+- Permission denied
+- Reconnecting
+- Partial result
+- Cancelled
+
+18. SECURITY UX
+- Persistent agent connection indicator.
+- Permission dashboard.
+- Recent sensitive actions.
+- Revoke agent button.
+- Emergency stop.
+- Security alerts.

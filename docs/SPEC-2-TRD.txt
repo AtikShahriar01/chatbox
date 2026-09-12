@@ -1,0 +1,290 @@
+LOCAL AI AGENT PLATFORM — TRD
+Version: 1.0
+Date: 2026-09-08
+
+1. SYSTEM ARCHITECTURE
+
+Recommended components:
+A. Web Client
+B. Backend API
+C. Authentication Service
+D. Agent Gateway
+E. Agent Orchestrator
+F. Model Provider Layer
+G. Task/Job Queue
+H. Realtime Event Service
+I. Database
+J. Local Agent
+K. Local Tool Runtime
+L. Policy/Security Engine
+M. Audit/Observability Layer
+
+Flow:
+Web Client
+  ↓ HTTPS/WebSocket
+Backend/API
+  ↓
+Agent Orchestrator
+  ├── Model Provider Adapter
+  ├── Task Planner
+  ├── Policy Engine
+  ├── Tool Registry
+  └── Event Bus
+          ↓ secure connection
+      Local Agent
+          ↓
+  File / Terminal / Browser / Computer / Git tools
+
+2. WEB CLIENT
+Suggested stack:
+- React/Next.js
+- TypeScript
+- Tailwind or equivalent design system
+- WebSocket/SSE for streaming
+- Monaco Editor for code editing
+
+Responsibilities:
+- Authentication UI
+- Chat
+- Project explorer
+- Code editor
+- Diff viewer
+- Terminal
+- Agent status
+- Approval dialogs
+- Activity timeline
+- Settings
+
+3. BACKEND API
+Suggested stack:
+- TypeScript with Node.js/NestJS or Fastify
+- REST for standard CRUD
+- WebSocket for realtime agent/task events
+- Background workers for long-running jobs
+
+Responsibilities:
+- Auth/session validation
+- Project management
+- Agent registration
+- Task lifecycle
+- Model routing
+- Tool policy enforcement
+- Event delivery
+- Audit logging
+- Usage accounting
+
+4. LOCAL AGENT
+The Local Agent is a native/desktop process installed on the user's PC.
+
+Recommended:
+- Rust, Go, or Node.js for the agent core.
+- A signed installer.
+- Local encrypted configuration.
+- Secure outbound connection to the backend.
+- No inbound public port by default.
+
+Agent lifecycle:
+START → LOAD CONFIG → AUTHENTICATE → CONNECT → HEARTBEAT → RECEIVE TASK → VALIDATE → EXECUTE TOOL → STREAM RESULT → COMPLETE/FAIL → IDLE
+
+5. AGENT CONNECTION
+Prefer outbound WebSocket connection.
+
+Requirements:
+- TLS.
+- Agent identity.
+- Short-lived access token.
+- Refresh/re-authentication.
+- Heartbeat.
+- Reconnect with exponential backoff.
+- Server-side revocation.
+- Device/session tracking.
+
+6. TOOL ARCHITECTURE
+
+Tool interface concept:
+Tool ID
+Description
+Input schema
+Permission requirement
+Risk level
+Executor
+Output schema
+Timeout
+Audit metadata
+
+Example:
+filesystem.read
+filesystem.write
+filesystem.delete
+terminal.exec
+browser.navigate
+browser.click
+computer.screenshot
+computer.click
+git.status
+git.diff
+git.commit
+
+7. TOOL EXECUTION PIPELINE
+AI requests tool
+→ Validate schema
+→ Check project scope
+→ Check permission
+→ Check risk
+→ Approval if required
+→ Execute
+→ Sanitize output
+→ Log event
+→ Return result to orchestrator
+
+8. COMMAND SECURITY
+Never blindly execute arbitrary AI-generated shell commands.
+
+Use:
+- Command parser.
+- Allowlist/denylist.
+- Working-directory restriction.
+- Environment filtering.
+- Timeout.
+- CPU/memory limits where supported.
+- Process tree tracking.
+- Kill capability.
+- Approval for privileged/dangerous operations.
+
+9. FILE SECURITY
+- Agent receives an allowed workspace root.
+- Canonicalize paths.
+- Block path traversal.
+- Reject access outside workspace unless explicitly permitted.
+- Protect .env, SSH keys, browser profiles and credential stores.
+- Use separate permissions for read/write/delete.
+
+10. BROWSER SECURITY
+- Domain allowlist.
+- Separate browser profile.
+- No automatic access to existing personal browser sessions.
+- Cookie/credential isolation.
+- Block downloads/execution unless approved.
+- Detect prompt injection in page content.
+
+11. COMPUTER CONTROL SECURITY
+- Explicit enable/disable.
+- Visible session indicator.
+- Screenshot privacy controls.
+- Emergency stop hotkey/control.
+- Restrict applications/windows where possible.
+- Log every action.
+
+12. AI PROVIDER ABSTRACTION
+Create a provider interface:
+generate()
+stream()
+countTokens()
+healthCheck()
+modelMetadata()
+
+Providers can be swapped without changing the agent/tool layer.
+
+API keys remain server-side. The browser and Local Agent should not receive provider secrets unless there is a deliberate, documented architecture requiring it.
+
+13. AGENT ORCHESTRATOR
+State machine:
+IDLE
+→ PLANNING
+→ WAITING_APPROVAL
+→ EXECUTING
+→ OBSERVING
+→ RETRYING
+→ COMPLETED
+or
+→ FAILED
+or
+→ CANCELLED
+
+Use max steps, max runtime and budget limits.
+
+14. DATABASE
+Recommended PostgreSQL.
+
+Core tables:
+users
+sessions
+agents
+agent_sessions
+workspaces
+projects
+project_members
+tasks
+task_steps
+conversations
+messages
+tool_calls
+approvals
+audit_logs
+providers
+models
+usage_records
+git_connections
+notifications
+security_events
+
+15. REALTIME EVENTS
+Events:
+agent.connected
+agent.disconnected
+task.created
+task.started
+task.plan_created
+approval.required
+tool.started
+tool.output
+tool.failed
+task.completed
+task.failed
+security.alert
+
+16. OBSERVABILITY
+- Structured JSON logs.
+- Correlation ID.
+- Task ID.
+- Agent ID.
+- User ID.
+- Metrics.
+- Error tracking.
+- Health checks.
+- Security event monitoring.
+
+17. DEPLOYMENT
+Cloud:
+- Web frontend
+- API
+- Worker
+- PostgreSQL
+- Redis/event broker
+- Object storage if needed
+
+User PC:
+- Local Agent
+- Optional local sandbox/runtime
+
+18. BACKUP/RECOVERY
+- Automated DB backups.
+- Point-in-time recovery where supported.
+- Agent reconnect.
+- Task state persistence.
+- Idempotency keys for critical operations.
+
+19. TESTING
+- Unit tests.
+- API integration tests.
+- Tool executor tests.
+- Permission tests.
+- Security tests.
+- Prompt-injection tests.
+- Path traversal tests.
+- Command injection tests.
+- Reconnect tests.
+- End-to-end task tests.
+
+20. TECHNICAL PRINCIPLE
+Treat the Local Agent as a privileged security boundary. The AI is untrusted input. Every tool call must be validated independently of the model.

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="bn">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Media Player — Chatbox Agent</title>
+<style>
+  body { margin: 0; background: #0b0d12; color: #e5e7eb; font-family: "Nirmala UI", system-ui, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  .wrap { max-width: 1100px; width: 96%; }
+  h1 { font-size: 16px; font-weight: 600; margin: 0 0 12px; color: #34d399; }
+  p { font-size: 12px; color: #9ca3af; margin: 8px 0; word-break: break-all; }
+  video, audio, img { max-width: 100%; border-radius: 12px; border: 1px solid #1f2937; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>🎬 Agent-এর বানানো মিডিয়া — <span id="name"></span></h1>
+    <div id="stage"></div>
+    <p id="path"></p>
+  </div>
+  <script>
+    const p = new URLSearchParams(location.search).get("path") || "";
+    const src = "/api/pc/raw?path=" + encodeURIComponent(p);
+    const ext = (p.split(".").pop() || "").toLowerCase();
+    document.getElementById("name").textContent = p.split(/[\\/]/).pop();
+    document.getElementById("path").textContent = p;
+    const stage = document.getElementById("stage");
+    if (["mp4", "webm", "mov"].includes(ext)) {
+      stage.innerHTML = '<video controls autoplay src="' + src + '" style="width:100%"></video>';
+    } else if (["mp3", "wav", "m4a", "ogg"].includes(ext)) {
+      stage.innerHTML = '<div style="font-size:64px;text-align:center">🎧</div><audio controls autoplay src="' + src + '" style="width:100%"></audio>';
+    } else {
+      stage.innerHTML = '<img src="' + src + '" alt="preview" />';
+    }
+  </script>
+</body>
+</html>

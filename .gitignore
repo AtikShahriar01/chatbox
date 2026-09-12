@@ -1,0 +1,35 @@
+# ---- dependencies & builds ----
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+
+# ---- portable toolchain (restored by start-*.bat; never belongs in git) ----
+tools/
+.home/
+.npm/
+.npm-global/
+.pip/
+.tmp/
+
+# ---- agent runtime state & secrets ----
+agent-bridge/bridge-token.txt
+agent-bridge/bridge-workspace.txt
+agent-bridge/bridge-mode.txt
+agent-bridge/audit.log
+agent-bridge/bridge-stdout.log
+agent-bridge/checkpoints/
+.auth/
+
+# ---- local env, caches, scratch ----
+.env
+.env.local
+*.log
+_trash/
+.selftest/sec-demo/
+.dbg/
+.gitconfig
+
+# ---- misc ----
+.DS_Store
+Thumbs.db

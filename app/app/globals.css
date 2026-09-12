@@ -1,0 +1,463 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Chatbox-inspired theme variables. JS swaps these for color presets. */
+:root,
+[data-theme="default"][data-mode="dark"] {
+  --cb-bg: #0f1115;
+  --cb-sidebar: #0b0d10;
+  --cb-surface: #161a21;
+  --cb-border: #232832;
+  --cb-text: #e7e9ee;
+  --cb-muted: #8b94a3;
+  --cb-accent: #2f6feb;
+  --cb-accent-hover: #4a82f5;
+  --cb-user-bubble: #1f6feb;
+  --cb-font: var(--font-inter), "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --cb-mesh-1: rgba(59, 130, 246, 0.45);
+  --cb-mesh-2: rgba(139, 92, 246, 0.35);
+  --cb-mesh-3: rgba(16, 185, 129, 0.25);
+}
+
+[data-theme="default"][data-mode="light"] {
+  --cb-bg: #f7f8fa;
+  --cb-sidebar: #ffffff;
+  --cb-surface: #ffffff;
+  --cb-border: #e5e7eb;
+  --cb-text: #1a1d22;
+  --cb-muted: #6b7280;
+  --cb-accent: #2f6feb;
+  --cb-accent-hover: #1f5fd8;
+  --cb-user-bubble: #2f6feb;
+  --cb-font: var(--font-inter), "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --cb-mesh-1: rgba(59, 130, 246, 0.28);
+  --cb-mesh-2: rgba(139, 92, 246, 0.22);
+  --cb-mesh-3: rgba(16, 185, 129, 0.16);
+}
+
+[data-theme="claude-classic"][data-mode="dark"] {
+  --cb-bg: #262624;
+  --cb-sidebar: #1f1e1c;
+  --cb-surface: #2d2c2a;
+  --cb-border: #3a3936;
+  --cb-text: #faf9f5;
+  --cb-muted: #a8a29e;
+  --cb-accent: #cc785c;
+  --cb-accent-hover: #e08867;
+  --cb-user-bubble: #cc785c;
+  --cb-font: var(--font-inter), "Inter", system-ui, sans-serif;
+  --cb-mesh-1: rgba(232, 136, 103, 0.40);
+  --cb-mesh-2: rgba(204, 120, 92, 0.30);
+  --cb-mesh-3: rgba(255, 180, 140, 0.20);
+}
+
+[data-theme="claude-classic"][data-mode="light"] {
+  --cb-bg: #faf9f5;
+  --cb-sidebar: #f5f4ee;
+  --cb-surface: #ffffff;
+  --cb-border: #e8e6dd;
+  --cb-text: #262624;
+  --cb-muted: #78716c;
+  --cb-accent: #cc785c;
+  --cb-accent-hover: #b86a4f;
+  --cb-user-bubble: #cc785c;
+  --cb-font: var(--font-inter), "Inter", system-ui, sans-serif;
+  --cb-mesh-1: rgba(232, 136, 103, 0.22);
+  --cb-mesh-2: rgba(204, 120, 92, 0.18);
+  --cb-mesh-3: rgba(255, 200, 150, 0.14);
+}
+
+[data-theme="mist-blue"][data-mode="dark"] {
+  --cb-bg: #0e1726;
+  --cb-sidebar: #08111e;
+  --cb-surface: #142033;
+  --cb-border: #1f2c44;
+  --cb-text: #e6edf7;
+  --cb-muted: #8aa0bf;
+  --cb-accent: #5eb1ff;
+  --cb-accent-hover: #82c3ff;
+  --cb-user-bubble: #3a7bd5;
+  --cb-font: var(--font-inter), "Inter", system-ui, sans-serif;
+  --cb-mesh-1: rgba(94, 177, 255, 0.40);
+  --cb-mesh-2: rgba(58, 123, 213, 0.32);
+  --cb-mesh-3: rgba(120, 200, 255, 0.22);
+}
+
+[data-theme="mist-blue"][data-mode="light"] {
+  --cb-bg: #f3f8ff;
+  --cb-sidebar: #ffffff;
+  --cb-surface: #ffffff;
+  --cb-border: #d8e4f5;
+  --cb-text: #14213d;
+  --cb-muted: #6b7d99;
+  --cb-accent: #3a7bd5;
+  --cb-accent-hover: #2c66b8;
+  --cb-user-bubble: #3a7bd5;
+  --cb-font: var(--font-inter), "Inter", system-ui, sans-serif;
+  --cb-mesh-1: rgba(58, 123, 213, 0.25);
+  --cb-mesh-2: rgba(94, 177, 255, 0.20);
+  --cb-mesh-3: rgba(120, 200, 255, 0.15);
+}
+
+html, body, #__next { height: 100%; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--cb-bg);
+  color: var(--cb-text);
+  font-family: var(--cb-font);
+  -webkit-font-smoothing: antialiased;
+  font-size: var(--cb-font-size, 14px);
+  font-feature-settings: "cv11", "ss01";
+  letter-spacing: -0.005em;
+}
+
+/* ============================================================
+   IDE SEMANTIC TOKENS (spec-5 §DESIGN TOKENS)
+   Centralized semantic layer mapped onto the active --cb-* theme.
+   Every IDE component consumes ONLY these — never raw colors.
+   ============================================================ */
+:root {
+  /* surfaces */
+  --bg: var(--cb-bg);
+  --panel-bg: color-mix(in srgb, var(--cb-bg) 55%, var(--cb-surface));
+  --surface: var(--cb-surface);
+  --surface-2: color-mix(in srgb, var(--cb-surface) 70%, var(--cb-border));
+  --border: color-mix(in srgb, var(--cb-border) 80%, transparent);
+  /* text */
+  --txt: var(--cb-text);
+  --txt-dim: var(--cb-muted);
+  --txt-faint: color-mix(in srgb, var(--cb-muted) 55%, transparent);
+  /* brand + states */
+  --accent: var(--cb-accent);
+  --accent-hover: var(--cb-accent-hover);
+  --ok: #22c55e;
+  --warn: #f59e0b;
+  --err: #ef4444;
+  --info: #38bdf8;
+  /* code font */
+  --mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+  /* motion (spec-5 §MOTION: 120–300ms, opacity/transform only) */
+  --motion-fast: 140ms;
+  --motion-med: 220ms;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* elevation */
+  --shadow-1: 0 1px 2px rgba(0,0,0,0.18);
+  --shadow-2: 0 8px 28px rgba(0,0,0,0.28);
+}
+[data-mode="light"] {
+  --ok: #16a34a;
+  --err: #dc2626;
+  --shadow-2: 0 8px 28px rgba(15, 23, 42, 0.12);
+}
+/* Respect reduced motion everywhere (spec-5 §MOTION) */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+/* IDE shared primitives */
+.ide-panel {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.ide-transition { transition: all var(--motion-med) var(--ease); }
+
+/* Unified view switching — quick premium fade/slide, GPU-friendly */
+@keyframes viewIn {
+  from { opacity: 0; transform: translateY(6px) scale(0.996); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.view-fade { animation: viewIn var(--motion-med) var(--ease); }
+
+/* Smooth scrolling everywhere — every scrollable area gets buttery easing,
+   momentum and a slim premium scrollbar. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--cb-muted) 45%, transparent) transparent;
+}
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--cb-muted) 38%, transparent);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background 0.2s ease;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--cb-muted) 65%, transparent);
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-corner { background: transparent; }
+
+/* Scroll containers scroll smoothly (Firefox smooth wheel + Chrome momentum) */
+.overflow-y-auto, .overflow-x-auto, [class*="overflow"] {
+  scroll-behavior: smooth;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Every clickable control gets an instant, soft tactile response. */
+button, [role="button"], [role="option"], a, input[type="checkbox"], select {
+  transition: color 0.15s ease, background-color 0.18s ease, border-color 0.18s ease,
+              box-shadow 0.2s ease, opacity 0.18s ease, transform 0.12s ease;
+}
+button:active:not(:disabled), [role="button"]:active:not(:disabled) {
+  transform: scale(0.98);
+}
+/* Soft focus ring for keyboard users */
+:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--cb-accent) 55%, transparent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Inputs feel alive while focused */
+input, textarea {
+  transition: border-color 0.18s ease, box-shadow 0.2s ease, background-color 0.18s ease;
+}
+input:focus, textarea:focus {
+  border-color: color-mix(in srgb, var(--cb-accent) 45%, var(--cb-border)) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cb-accent) 12%, transparent);
+}
+
+/* Legacy scrollbar rules (superseded above, kept for specificity conflicts) */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--cb-muted) 38%, transparent); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--cb-muted) 65%, transparent); }
+
+/* Premium gradient mesh background — fixed, behind everything. Always in motion. */
+.cb-mesh-bg {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden;
+}
+.cb-mesh-bg::before,
+.cb-mesh-bg::after,
+.cb-mesh-bg > .blob {
+  content: ""; position: absolute; border-radius: 50%; filter: blur(110px);
+  opacity: 0.85;
+  will-change: transform;
+}
+.cb-mesh-bg::before {
+  width: 600px; height: 600px; top: -200px; left: -100px;
+  background: var(--cb-mesh-1);
+  animation: mesh-float-1 14s ease-in-out infinite;
+}
+.cb-mesh-bg::after {
+  width: 700px; height: 700px; bottom: -250px; right: -150px;
+  background: var(--cb-mesh-2);
+  animation: mesh-float-2 19s ease-in-out infinite;
+}
+/* Third blob: blob-3 (center) */
+.cb-mesh-bg > .blob {
+  width: 500px; height: 500px; top: 30%; left: 50%;
+  background: var(--cb-mesh-3);
+  animation: mesh-float-3 11s ease-in-out infinite;
+}
+/* Fourth + fifth blobs for continuous parallax motion */
+.cb-mesh-bg > .blob-4 {
+  width: 380px; height: 380px; top: 10%; right: 12%;
+  background: var(--cb-mesh-2);
+  opacity: 0.5;
+  animation: mesh-float-4 9s ease-in-out infinite;
+}
+.cb-mesh-bg > .blob-5 {
+  width: 440px; height: 440px; bottom: 8%; left: 18%;
+  background: var(--cb-mesh-1);
+  opacity: 0.4;
+  animation: mesh-float-5 13s ease-in-out infinite;
+}
+/* Subtle full-surface hue drift — keeps colours alive without being loud */
+.cb-mesh-bg > .hue {
+  position: absolute; inset: -20%;
+  background: conic-gradient(from 0deg, transparent 0%, color-mix(in srgb, var(--cb-accent) 6%, transparent) 25%, transparent 50%, color-mix(in srgb, var(--cb-mesh-3) 6%, transparent) 75%, transparent 100%);
+  animation: mesh-hue 30s linear infinite;
+  opacity: 0.5;
+}
+/* Mouse-following spotlight — --mouse-x/--mouse-y set by JS on <html> */
+.cb-mesh-bg > .spotlight {
+  position: absolute; inset: 0;
+  background: radial-gradient(420px circle at var(--mouse-x, 50%) var(--mouse-y, 30%),
+    color-mix(in srgb, var(--cb-accent) 9%, transparent), transparent 65%);
+  opacity: 0.9;
+  transition: opacity 0.4s ease;
+}
+@keyframes mesh-float-1 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(90px, 70px) scale(1.12); } }
+@keyframes mesh-float-2 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-70px, -90px) scale(1.08); } }
+@keyframes mesh-float-3 { 0%,100% { transform: translate(-50%,-50%) scale(1); } 50% { transform: translate(-42%,-62%) scale(1.18); } }
+@keyframes mesh-float-4 { 0%,100% { transform: translate(0,0) rotate(0deg) scale(1); } 50% { transform: translate(-60px, 50px) rotate(20deg) scale(1.15); } }
+@keyframes mesh-float-5 { 0%,100% { transform: translate(0,0) rotate(0deg) scale(1); } 50% { transform: translate(70px, -50px) rotate(-15deg) scale(1.1); } }
+@keyframes mesh-hue { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .cb-mesh-bg::before, .cb-mesh-bg::after, .cb-mesh-bg > .blob,
+  .cb-mesh-bg > .blob-4, .cb-mesh-bg > .blob-5, .cb-mesh-bg > .hue { animation: none; }
+}
+
+/* Focus rings (premium) */
+.cb-focus {
+  outline: none;
+}
+.cb-focus:focus-visible {
+  box-shadow: 0 0 0 2px var(--cb-bg), 0 0 0 4px var(--cb-accent);
+  border-radius: 8px;
+}
+
+/* Markdown rendering */
+.prose-cb { line-height: 1.65; }
+.prose-cb p { margin: 0.6em 0; }
+.prose-cb h1, .prose-cb h2, .prose-cb h3, .prose-cb h4 { font-weight: 600; margin: 1em 0 0.4em; letter-spacing: -0.01em; }
+.prose-cb h1 { font-size: 1.4em; }
+.prose-cb h2 { font-size: 1.25em; }
+.prose-cb h3 { font-size: 1.1em; }
+.prose-cb code:not(pre code) {
+  background: var(--cb-border);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  font-size: 0.9em;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.prose-cb pre {
+  background: #0d1117;
+  color: #e6edf3;
+  padding: 0.9em 1em;
+  border-radius: 10px;
+  overflow-x: auto;
+  font-size: 0.85em;
+  border: 1px solid var(--cb-border);
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.prose-cb pre code { background: transparent; padding: 0; }
+.prose-cb ul, .prose-cb ol { padding-left: 1.4em; margin: 0.5em 0; }
+.prose-cb li { margin: 0.2em 0; }
+.prose-cb a { color: var(--cb-accent); text-decoration: underline; text-underline-offset: 2px; }
+.prose-cb blockquote {
+  border-left: 3px solid var(--cb-accent);
+  padding-left: 0.8em;
+  color: var(--cb-muted);
+  margin: 0.6em 0;
+}
+.prose-cb table { border-collapse: collapse; margin: 0.6em 0; }
+.prose-cb th, .prose-cb td { border: 1px solid var(--cb-border); padding: 0.35em 0.7em; }
+.prose-cb th { background: var(--cb-surface); }
+
+/* highlight.js minimal theme */
+.hljs-keyword, .hljs-selector-tag, .hljs-built_in { color: #ff7b72; }
+.hljs-string, .hljs-attr { color: #a5d6ff; }
+.hljs-number, .hljs-literal { color: #79c0ff; }
+.hljs-comment { color: #8b949e; font-style: italic; }
+.hljs-function .hljs-title, .hljs-title.function_ { color: #d2a8ff; }
+.hljs-variable, .hljs-name { color: #ffa657; }
+
+/* Non-jitter streaming cursor (background-color span, not a glyph) */
+.cb-cursor {
+  display: inline-block;
+  width: 0.55ch;
+  height: 1em;
+  background: currentColor;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  border-radius: 1px;
+  animation: cb-blink 1.05s step-end infinite;
+  opacity: 0.65;
+}
+@keyframes cb-blink { 0%, 50% { opacity: 0.65; } 50.01%, 100% { opacity: 0; } }
+
+/* Thinking skeleton */
+.cb-skel {
+  display: flex; flex-direction: column; gap: 0.5em; padding: 0.25em 0;
+}
+.cb-skel > div {
+  height: 0.85em; border-radius: 4px;
+  background: linear-gradient(90deg, var(--cb-border) 0%, var(--cb-muted) 50%, var(--cb-border) 100%);
+  background-size: 200% 100%;
+  animation: cb-skel-shimmer 1.5s ease-in-out infinite;
+  opacity: 0.5;
+}
+.cb-skel > div:nth-child(1) { width: 78%; }
+.cb-skel > div:nth-child(2) { width: 92%; animation-delay: 0.15s; }
+.cb-skel > div:nth-child(3) { width: 60%; animation-delay: 0.3s; }
+@keyframes cb-skel-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+/* Agent notes in the live popup — gentle flowing color while the agent types */
+.cb-agent-note {
+  background: linear-gradient(90deg, var(--cb-text) 0%, var(--cb-accent) 35%, #a855f7 70%, var(--cb-text) 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: cb-note-flow 3.2s linear infinite;
+}
+@keyframes cb-note-flow {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Richer code palette for agent screens */
+.hljs-type, .hljs-class .hljs-title, .hljs-title.class_ { color: #ffa657; }
+.hljs-params { color: #e6edf3; }
+.hljs-meta, .hljs-doctag { color: #79c0ff; }
+.hljs-section, .hljs-name { color: #7ee787; }
+.hljs-deletion { color: #ffb3b3; background: rgba(239,68,68,0.14); }
+.hljs-addition { color: #b6ffb6; background: rgba(34,197,94,0.12); }
+
+/* Soft elevated card */
+.cb-card {
+  background: var(--cb-surface);
+  border: 1px solid var(--cb-border);
+  border-radius: 14px;
+}
+
+/* View Transitions API — make every theme switch a smooth crossfade */
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 240ms;
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+}
+
+/* TokenBadge shimmer (used for streaming indicator) */
+@keyframes cb-token-pulse {
+  0%, 100% { opacity: 0.5; transform: scale(0.95); }
+  50%      { opacity: 1;   transform: scale(1.05); }
+}
+.cb-token-pulse {
+  animation: cb-token-pulse 1.4s ease-in-out infinite;
+}
+
+/* Mini bar chart token breakdown */
+.cb-token-bar {
+  display: flex;
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  position: relative;
+  background: var(--cb-border);
+}
+.cb-token-bar > .seg-input { background: linear-gradient(90deg, #3b82f6, #60a5fa); }
+.cb-token-bar > .seg-output { background: linear-gradient(90deg, #a855f7, #c084fc); }
+.cb-token-bar > .seg-cached { background: linear-gradient(90deg, #06b6d4, #22d3ee); }
+.cb-token-bar > .seg-reasoning { background: linear-gradient(90deg, #ec4899, #f472b6); }
+.cb-token-bar > .seg-thinking { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+
+/* ===== reduceMotion (Settings → General, wired via useTheme) =====
+   Kills the animated mesh background + heavy transitions — the biggest
+   GPU cost on older machines. data-reduce-motion is set on <html>. */
+[data-reduce-motion="on"] .cb-mesh-bg > *,
+[data-reduce-motion="on"] .cb-mesh-bg::before,
+[data-reduce-motion="on"] .cb-mesh-bg::after {
+  animation: none !important;
+}
+[data-reduce-motion="on"] .cb-skel > div {
+  animation: none !important;
+  opacity: 0.55;
+}
+[data-reduce-motion="on"] * {
+  transition-duration: 0.08s !important;
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+}
