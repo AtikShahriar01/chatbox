@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="#-quick-installation--run">
-    <img src="https://img.shields.io/badge/Release-v1.0-blue.svg?style=for-the-badge" alt="Release">
+    <img src="https://img.shields.io/badge/Release-v1.1-blue.svg?style=for-the-badge" alt="Release">
   </a>
   <a href="https://nextjs.org/">
     <img src="https://img.shields.io/badge/Next.js-14-black.svg?style=for-the-badge&logo=next.js&logoColor=white" alt="Next.js">
