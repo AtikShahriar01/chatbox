@@ -181,13 +181,31 @@ export const useStore = create(
 
       // custom models (user-added) + copilots (user-added)
       customModels: [],
+      // Model system (directive §7): default + fallback model and recently used.
+      defaultModel: "openai/gpt-4o-mini",
+      fallbackModel: "",
+      recentModels: [],
       activeCopilotId: "default",
       copilots: DEFAULT_COPILOTS,
+
+      // Memory system (directive §14) — user-controlled long-term memory that
+      // is injected into the system prompt. Fully inspectable/editable/delete-able.
+      memory: {
+        enabled: true,
+        profile: [],        // facts about the user
+        project: {},        // workspacePath → string[] notes
+        agent: [],          // agent learnings
+        providerPrefs: {},  // provider → string
+      },
 
       // currency + budget
       fxRateBDT: 110,        // 1 USD = 110 BDT (configurable)
       costPrimary: "bdt",     // bdt | usd — which comes first in TokenBadge
       monthlyBudgetUSD: null, // null = unlimited
+      // Budget enforcement (§8): when true, sending is blocked once the monthly
+      // actual cost passes monthlyBudgetUSD (default off → warn only).
+      monthlyBudgetEnforce: false,
+      localCostPerMtok: 0,    // $/1M tokens estimate for local (Ollama) compute
       modelPricing: {},       // user overrides: { modelId: { input, output, tier } }
 
       // Internal Usage Value reference rates (BDT per 1M tokens + BDT→USDT).
@@ -209,6 +227,8 @@ export const useStore = create(
         costUSD: 0,
         costBDT: 0,
         byModel: {}, // { modelId: { requests, promptTokens, completionTokens, costUSD, costBDT } }
+        byProvider: {}, // { provider: { requests, costUSD, costBDT } }
+        localComputeUSD: 0,
         byDay: {},   // { 'YYYY-MM-DD': { requests, costUSD } }
       },
       todayUsage: {
@@ -225,6 +245,12 @@ export const useStore = create(
       },
 
       setActive: (id) => set({ activeChatId: id }),
+      // Budget gate (§8): true when enforcement is on and the monthly actual
+      // cost already meets/exceeds the configured budget.
+      isOverBudget: () => {
+        const s = get();
+        return !!(s.monthlyBudgetEnforce && s.monthlyBudgetUSD && (s.monthlyUsage?.costUSD || 0) >= s.monthlyBudgetUSD);
+      },
       setSidebar: (v) => set({ sidebarOpen: v }),
       setSearchOpen: (v) => set({ searchOpen: v }),
       setSettingsOpen: (v) => set({ settingsOpen: v }),
@@ -273,6 +299,23 @@ export const useStore = create(
       },
       togglePin: (id) => {
         set((s) => ({ chats: s.chats.map((c) => (c.id === id ? { ...c, pinned: !c.pinned } : c)) }));
+      },
+      // Chat system (§13): duplicate, archive/restore, folder, bookmark.
+      duplicateChat: (id) => {
+        const src = get().chats.find((c) => c.id === id);
+        if (!src) return null;
+        const copy = { ...src, id: newId(), title: (src.title || "Chat") + " (copy)", pinned: false, createdAt: Date.now(), messages: src.messages.map((m) => ({ ...m, id: "msg_" + newId() })) };
+        set((s) => ({ chats: [copy, ...s.chats], activeChatId: copy.id }));
+        return copy.id;
+      },
+      toggleArchive: (id) => {
+        set((s) => ({ chats: s.chats.map((c) => (c.id === id ? { ...c, archived: !c.archived, pinned: false } : c)) }));
+      },
+      setChatFolder: (id, folder) => {
+        set((s) => ({ chats: s.chats.map((c) => (c.id === id ? { ...c, folder: String(folder || "").slice(0, 40) } : c)) }));
+      },
+      toggleBookmark: (chatId, msgId) => {
+        set((s) => ({ chats: s.chats.map((c) => (c.id === chatId ? { ...c, messages: c.messages.map((m) => (m.id === msgId ? { ...m, bookmarked: !m.bookmarked } : m)) } : c)) }));
       },
       renameChat: (id, title) => {
         set((s) => ({ chats: s.chats.map((c) => (c.id === id ? { ...c, title } : c)) }));
@@ -380,7 +423,7 @@ export const useStore = create(
           const m = s.monthlyUsage.month === month ? s.monthlyUsage : {
             month, requests: 0, promptTokens: 0, completionTokens: 0,
             reasoningTokens: 0, cachedTokens: 0, costUSD: 0, costBDT: 0,
-            byModel: {}, byDay: {},
+            byModel: {}, byProvider: {}, byDay: {}, localComputeUSD: 0,
           };
           // If a streaming preview was already showing this request's cost in
           // todayUsage, back it out first so the final record isn't double-counted.
@@ -405,6 +448,12 @@ export const useStore = create(
           }
 
           const mid = modelId || "unknown";
+          const prov = mid.split("/")[0] || "unknown";
+          // Local-compute estimate (§8): Ollama/LM Studio cost $0 API but burn PC
+          // time — a configurable per-1M-token "electricity" rate for reporting.
+          const local = /ollama|localhost|127\.|11434|1234/i.test((s.apiBaseUrl || "") + mid);
+          const localRate = s.localCostPerMtok || 0; // $/1M tokens, user-configurable, default 0
+          const localCostUSD = local ? ((promptTokens + completionTokens) / 1e6) * localRate : 0;
           return {
             monthlyUsage: {
               ...m,
@@ -430,6 +479,15 @@ export const useStore = create(
                   valueUSDT: (m.byModel[mid]?.valueUSDT || 0) + valueUSDT,
                 },
               },
+              byProvider: {
+                ...m.byProvider,
+                [prov]: {
+                  requests: (m.byProvider?.[prov]?.requests || 0) + 1,
+                  costUSD: (m.byProvider?.[prov]?.costUSD || 0) + cost,
+                  costBDT: (m.byProvider?.[prov]?.costBDT || 0) + costBDT,
+                },
+              },
+              localComputeUSD: (m.localComputeUSD || 0) + localCostUSD,
               byDay: {
                 ...m.byDay,
                 [today]: {
@@ -556,6 +614,13 @@ export const useStore = create(
         set((s) => ({ customModels: s.customModels.filter((m) => m.id !== id) }));
         get().pushToast({ type: "info", message: "Model removed." });
       },
+      // Model system helpers (§7): track recently used + default/fallback pickers.
+      markModelUsed: (id) => {
+        if (!id) return;
+        set((s) => ({ recentModels: [id, ...s.recentModels.filter((x) => x !== id)].slice(0, 8) }));
+      },
+      setDefaultModel: (id) => set({ defaultModel: id }),
+      setFallbackModel: (id) => set({ fallbackModel: id || "" }),
 
       // copilots
       setActiveCopilot: (id) => {
@@ -588,6 +653,48 @@ export const useStore = create(
         }));
       },
 
+      // ── Memory system (directive §14) ──
+      toggleMemory: (enabled) => set((s) => ({ memory: { ...s.memory, enabled } })),
+      rememberMemory: (kind, text, key) => {
+        const t = String(text || "").trim().slice(0, 500);
+        if (!t) return;
+        set((s) => {
+          const m = { ...s.memory };
+          if (kind === "project") { const k = key || "(default)"; m.project = { ...m.project, [k]: [...(m.project[k] || []), t].slice(-30) }; }
+          else if (kind === "provider") { m.providerPrefs = { ...m.providerPrefs, [key || "default"]: t }; }
+          else { const arr = kind === "agent" ? "agent" : "profile"; m[arr] = [...m[arr], t].slice(-40); }
+          return { memory: m };
+        });
+      },
+      forgetMemory: (kind, index, key) => {
+        set((s) => {
+          const m = { ...s.memory };
+          if (kind === "project") { const k = key || "(default)"; m.project = { ...m.project, [k]: (m.project[k] || []).filter((_, i) => i !== index) }; }
+          else if (kind === "provider") { const { [key]: _d, ...rest } = m.providerPrefs; m.providerPrefs = rest; }
+          else { const arr = kind === "agent" ? "agent" : "profile"; m[arr] = m[arr].filter((_, i) => i !== index); }
+          return { memory: m };
+        });
+      },
+      clearMemory: (which) => set((s) => {
+        const m = { ...s.memory };
+        if (which === "all" || which === "profile") m.profile = [];
+        if (which === "all" || which === "project") m.project = {};
+        if (which === "all" || which === "agent") m.agent = [];
+        if (which === "all" || which === "provider") m.providerPrefs = {};
+        return { memory: m };
+      }),
+      buildMemoryPrompt: (workspace) => {
+        const m = get().memory;
+        if (!m || !m.enabled) return "";
+        const parts = [];
+        if (m.profile?.length) parts.push("About the user:\n- " + m.profile.join("\n- "));
+        const pn = (workspace && m.project?.[workspace]) || [];
+        if (pn.length) parts.push("Project notes (" + (workspace || "") + "):\n- " + pn.join("\n- "));
+        if (m.agent?.length) parts.push("Your learned notes:\n- " + m.agent.join("\n- "));
+        if (!parts.length) return "";
+        return "\n\n[Long-term memory — treat as trusted context, verify before acting]\n" + parts.join("\n\n").slice(0, 4000);
+      },
+
       toggleFavorite: (modelId) => {
         set((s) => ({
           favorites: s.favorites.includes(modelId)
@@ -618,13 +725,19 @@ export const useStore = create(
         apiKey: s.apiKey,
         apiModel: s.apiModel,
         customModels: s.customModels,
+        defaultModel: s.defaultModel,
+        fallbackModel: s.fallbackModel,
+        recentModels: (s.recentModels || []).slice(0, 8),
         copilots: s.copilots,
+        memory: s.memory,
         activeCopilotId: s.activeCopilotId,
         favorites: s.favorites,
         sidebarOpen: s.sidebarOpen,
         fxRateBDT: s.fxRateBDT,
         costPrimary: s.costPrimary,
         monthlyBudgetUSD: s.monthlyBudgetUSD,
+        monthlyBudgetEnforce: s.monthlyBudgetEnforce,
+        localCostPerMtok: s.localCostPerMtok,
         modelPricing: s.modelPricing,
         internalRates: s.internalRates,
         pcFullAccess: s.pcFullAccess,

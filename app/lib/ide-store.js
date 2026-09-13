@@ -95,6 +95,20 @@ export const useIde = create()(
       // ------------------------------------------------------------ tasks --
       tasks: [], // [{ id, title, status, steps: [{title, status, detail, tools}], error, startedAt, finishedAt, files: [], commands: [] }]
       addTask: (t) => set({ tasks: [t, ...get().tasks].slice(0, 40) }),
+      // Persistent agent task history + queue (directive §9). History survives
+      // reload (see partialize); queue holds goals not yet run.
+      taskHistory: [], // [{ id, title, status, summary, startedAt, finishedAt, files, commands, count }]
+      pushTaskHistory: (t) => set((s) => ({
+        taskHistory: [{
+          id: t.id, title: t.title, status: t.status, summary: t.summary || null,
+          startedAt: t.startedAt, finishedAt: t.finishedAt || new Date().toISOString(),
+          files: t.files || [], commands: t.commands || [], todos: t.todos || [],
+        }, ...s.taskHistory].slice(0, 50),
+      })),
+      clearTaskHistory: () => set({ taskHistory: [] }),
+      taskQueue: [], // queued goal strings
+      enqueueTask: (goal) => set((s) => ({ taskQueue: [...s.taskQueue, String(goal).slice(0, 500)] })),
+      dequeueTask: () => { const s = get(); const [head, ...rest] = s.taskQueue; set({ taskQueue: rest }); return head || null; },
       updateTask: (id, patch) =>
         set({ tasks: get().tasks.map((t) => (t.id === id ? { ...t, ...patch } : t)) }),
       updateTaskStep: (taskId, idx, patch) =>
@@ -136,7 +150,7 @@ export const useIde = create()(
     {
       name: "chatbox-ide",
       storage: createJSONStorage(() => localStorage),
-      partialize: (s) => ({ panels: s.panels }), // only layout persists
+      partialize: (s) => ({ panels: s.panels, taskHistory: (s.taskHistory || []).slice(0, 50), taskQueue: s.taskQueue || [] }), // layout + durable agent task history/queue
     }
   )
 );

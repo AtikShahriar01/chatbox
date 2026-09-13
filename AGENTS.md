@@ -10,8 +10,13 @@
 3. **এনভায়রনমেন্ট:** যেকোনো npm/pip/node/git কমান্ডের আগে `source env.sh` —
    সব কিছু H:\chatbot create-এর ভেতরে থাকবে, C: ড্রাইভে কিছুই লিখবে না
    (বিস্তারিত: docs/ENV-RULES.md)।
-4. **টেস্ট:** সিকিউরিটি-সংবেদনশীল পরিবর্তনের পরে অবশ্যই চালাও:
-   - `node .selftest/parser-tests.mjs`
-   - `node .selftest/security-live-tests.mjs` (সার্ভার + bridge চালু অবস্থায়)
+4. **টেস্ট (§20 test pyramid):** সিকিউরিটি-সংবেদনশীল পরিবর্তনের পরে অবশ্যই চালাও:
+   - `node .selftest/run-all.mjs` — সম্পূর্ণ পিরামিড: unit(52) · parser(12) ·
+     integration(32) · security-live(25) · security-deep(35) · e2e(16)
+     (server :3000 + bridge :8765 চালু অবস্থায়)
+   - সার্ভার ছাড়া দ্রুত চেক: `node .selftest/run-all.mjs --offline`
+   - কোন ক্যাটাগরি কোথায় টেস্ট হয় তার ম্যাপ: [docs/TESTING.md](docs/TESTING.md)
+   - নতুন API route / bridge op যোগ করলে সংশ্লিষ্ট unit + integration +
+     security-deep টেস্টও যোগ করো (suite-গুলো সবুজ না হওয়া পর্যন্ত কাজ শেষ নয়)।
 5. **নিষিদ্ধ:** `git config --global`, C:-তে ফাইল তৈরি, সিকিউরিটি কন্ট্রোল ডিজেবল
    করে সুবিধা আনা, সিক্রেট hardcode করা।

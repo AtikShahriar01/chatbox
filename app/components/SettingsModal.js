@@ -16,6 +16,7 @@ const SECTIONS = [
   { key: "provider", label: "Model Provider", icon: null },
   { key: "models", label: "Models", icon: null },
   { key: "copilots", label: "Copilots", icon: null },
+  { key: "memory", label: "Memory", icon: null },
   { key: "pc", label: "PC Access", icon: null },
   { key: "shortcuts", label: "Shortcuts", icon: null },
   { key: "data", label: "Data", icon: null },
@@ -48,6 +49,23 @@ export default function SettingsModal() {
   const apiKey = useStore((s) => s.apiKey);
   const apiModel = useStore((s) => s.apiModel);
   const setSetting = useStore((s) => s.setSetting);
+  const sessionKeyOnly = useStore((s) => s.sessionKeyOnly);
+  const providers = useStore((s) => s.providers);
+  const activeProviderId = useStore((s) => s.activeProviderId);
+  const saveProvider = useStore((s) => s.saveProvider);
+  const setActiveProvider = useStore((s) => s.setActiveProvider);
+  const duplicateProvider = useStore((s) => s.duplicateProvider);
+  const removeProvider = useStore((s) => s.removeProvider);
+  const updateProvider = useStore((s) => s.updateProvider);
+  const defaultModel = useStore((s) => s.defaultModel);
+  const fallbackModel = useStore((s) => s.fallbackModel);
+  const setDefaultModel = useStore((s) => s.setDefaultModel);
+  const setFallbackModel = useStore((s) => s.setFallbackModel);
+  const memory = useStore((s) => s.memory);
+  const toggleMemory = useStore((s) => s.toggleMemory);
+  const rememberMemory = useStore((s) => s.rememberMemory);
+  const forgetMemory = useStore((s) => s.forgetMemory);
+  const clearMemory = useStore((s) => s.clearMemory);
   const chats = useStore((s) => s.chats);
   const copilots = useStore((s) => s.copilots);
   const [modelEditorOpen, setModelEditorOpen] = useState(false);
@@ -301,8 +319,21 @@ export default function SettingsModal() {
                       <Row label="API Key">
                         <input type="password" value={apiKey} onChange={(e) => setSetting("apiKey", e.target.value)} placeholder={apiBaseUrl.includes("11434") || apiBaseUrl.includes("1234") ? "(no key needed for local)" : "sk-..."} className="cb-focus w-full max-w-xl px-3 py-2 rounded text-sm transition-colors" style={inputStyle} />
                       </Row>
+                      <Row label="">
+                        <label className="cb-focus flex items-center gap-2 text-xs cursor-pointer select-none" style={{ color: "var(--cb-muted)" }}>
+                          <input type="checkbox" checked={!!sessionKeyOnly} onChange={(e) => setSetting("sessionKeyOnly", e.target.checked)} />
+                          🔐 এই ডিভাইসে key মনে রাখবে না — শুধু এই সেশনে (reload-এ মুছে যাবে)
+                        </label>
+                      </Row>
                       <Row label="Model">
                         <input value={apiModel} onChange={(e) => setSetting("apiModel", e.target.value)} placeholder="openai/gpt-4o-mini" className="cb-focus w-full max-w-xl px-3 py-2 rounded text-sm transition-colors" style={inputStyle} />
+                      </Row>
+                      <Row label="Default / Fallback">
+                        <div className="flex flex-wrap items-center gap-2 text-xs" style={{ color: "var(--cb-muted)" }}>
+                          <button onClick={() => setDefaultModel(apiModel)} className="cb-focus px-2 py-1 rounded border" style={{ borderColor: "var(--cb-border)" }}>★ “{apiModel}” = Default</button>
+                          <button onClick={() => setFallbackModel(apiModel)} className="cb-focus px-2 py-1 rounded border" style={{ borderColor: "var(--cb-border)" }}>↩ “{apiModel}” = Fallback</button>
+                          <span className="text-[10.5px]">default: <b>{defaultModel || "—"}</b> · fallback: <b>{fallbackModel || "—"}</b></span>
+                        </div>
                       </Row>
                       <div className="flex items-center gap-2">
                         <motion.button
@@ -322,6 +353,44 @@ export default function SettingsModal() {
                       </div>
                       <div className="rounded-lg p-3 text-xs leading-relaxed" style={{ background: "var(--cb-surface)", color: "var(--cb-muted)" }}>
                         <strong style={{ color: "var(--cb-text)" }}>Works with:</strong> OpenAI · OpenRouter · Anthropic · Google Gemini · Groq · DeepSeek · Mistral · xAI · Together · Fireworks · Cohere · Ollama (set base to <code>http://localhost:11434/v1</code>) · LM Studio · vLLM · any OpenAI-compatible endpoint.
+                      </div>
+
+                      {/* ── Universal Provider Engine (directive §6) ── */}
+                      <div className="pt-2">
+                        <div className="flex items-center justify-between mb-2">
+                          <h4 className="text-sm font-semibold">🧩 Saved Providers</h4>
+                          <button onClick={() => { const n = window.prompt("Provider-এর নাম?", apiModel || "My Provider"); if (n) saveProvider({ name: n }); }} className="cb-focus px-2.5 py-1 rounded text-xs font-medium" style={{ background: "var(--cb-accent)", color: "white" }}>+ Save current</button>
+                        </div>
+                        {!providers?.length && <p className="text-xs" style={{ color: "var(--cb-muted)" }}>baseUrl/key/model সেট করে <b>Save current</b> চাপুন — বহু provider save করে switch করা যাবে।</p>}
+                        <div className="space-y-2">
+                          {(providers || []).map((p) => {
+                            const active = p.id === activeProviderId;
+                            return (
+                              <div key={p.id} className="rounded-lg border p-2.5" style={{ borderColor: active ? "var(--cb-accent)" : "var(--cb-border)", background: active ? "color-mix(in srgb, var(--cb-accent) 6%, transparent)" : "var(--cb-surface)" }}>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-medium" style={{ color: "var(--cb-text)" }}>{p.name}</span>
+                                  {active && <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: "var(--cb-accent)", color: "white" }}>active</span>}
+                                  <div className="ml-auto flex gap-1.5 text-[11px]">
+                                    {!active && <button onClick={() => setActiveProvider(p.id)} className="cb-focus underline" style={{ color: "var(--cb-accent)" }}>Load</button>}
+                                    <button onClick={() => duplicateProvider(p.id)} className="cb-focus underline" style={{ color: "var(--cb-muted)" }}>Duplicate</button>
+                                    <button onClick={() => removeProvider(p.id)} className="cb-focus underline" style={{ color: "#ef4444" }}>Delete</button>
+                                  </div>
+                                </div>
+                                <div className="text-[10.5px] font-mono mt-1 truncate" style={{ color: "var(--cb-muted)" }}>{p.baseUrl} · {p.model || "(no model)"}</div>
+                                {active && (
+                                  <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2">
+                                    {["streaming", "vision", "tools", "reasoning", "image", "audio", "embedding"].map((cap) => (
+                                      <label key={cap} className="flex items-center gap-1 text-[10.5px]" style={{ color: "var(--cb-muted)" }}>
+                                        <input type="checkbox" checked={!!(p.capabilities || {})[cap]} onChange={(e) => updateProvider(p.id, { capabilities: { ...p.capabilities, [cap]: e.target.checked } })} />
+                                        {cap}
+                                      </label>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
                     </div>
                   )}
@@ -375,6 +444,54 @@ export default function SettingsModal() {
                         <Shortcut k="⌘/Ctrl + N" v="New chat" />
                         <Shortcut k="⌘/Ctrl + I" v="Focus input" />
                         <Shortcut k="?" v="This help" />
+                      </div>
+                    </div>
+                  )}
+
+                  {tab === "memory" && (
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h3 className="text-base font-semibold tracking-tight">🧠 Memory</h3>
+                          <p className="text-sm" style={{ color: "var(--cb-muted)" }}>Long-term facts injected into every prompt — you fully control them.</p>
+                        </div>
+                        <label className="flex items-center gap-2 text-xs">
+                          <input type="checkbox" checked={!!memory?.enabled} onChange={(e) => toggleMemory(e.target.checked)} />
+                          Enabled
+                        </label>
+                      </div>
+                      {[["profile", "👤 About you"], ["agent", "🤖 Agent notes"]].map(([kind, label]) => (
+                        <div key={kind}>
+                          <div className="mb-1 flex items-center justify-between">
+                            <h4 className="text-[13px] font-medium">{label}</h4>
+                            <button onClick={() => { const v = window.prompt("নতুন memory:"); if (v) rememberMemory(kind, v); }} className="cb-focus text-xs underline" style={{ color: "var(--cb-accent)" }}>+ Add</button>
+                          </div>
+                          {(memory?.[kind] || []).map((item, i) => (
+                            <div key={i} className="mb-1 flex items-start gap-2 rounded-lg px-2.5 py-1.5 text-sm" style={{ background: "var(--cb-surface)" }}>
+                              <span className="min-w-0 flex-1 break-words">{item}</span>
+                              <button onClick={() => forgetMemory(kind, i)} className="shrink-0 text-xs" style={{ color: "#ef4444" }}>✕</button>
+                            </div>
+                          ))}
+                          {!(memory?.[kind] || []).length && <p className="text-[11px]" style={{ color: "var(--cb-muted)" }}>খালি — + Add চাপুন।</p>}
+                        </div>
+                      ))}
+                      <div>
+                        <h4 className="mb-1 text-[13px] font-medium">📁 Project notes</h4>
+                        {Object.entries(memory?.project || {}).length === 0 && <p className="text-[11px]" style={{ color: "var(--cb-muted)" }}>এখনো কোনো project memory নেই।</p>}
+                        {Object.entries(memory?.project || {}).map(([ws, notes]) => (
+                          <div key={ws} className="mb-2">
+                            <p className="font-mono text-[10.5px]" style={{ color: "var(--cb-muted)" }}>{ws}</p>
+                            {(notes || []).map((item, i) => (
+                              <div key={i} className="mb-1 flex items-start gap-2 rounded px-2.5 py-1 text-sm" style={{ background: "var(--cb-surface)" }}>
+                                <span className="min-w-0 flex-1 break-words">{item}</span>
+                                <button onClick={() => forgetMemory("project", i, ws)} className="shrink-0 text-xs" style={{ color: "#ef4444" }}>✕</button>
+                              </div>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="flex gap-2 pt-2">
+                        <button onClick={() => clearMemory("all")} className="cb-focus rounded-md border px-3 py-1.5 text-xs" style={{ borderColor: "#ef4444", color: "#ef4444" }}>🗑️ Clear all memory</button>
                       </div>
                     </div>
                   )}

@@ -127,6 +127,8 @@ export default function ChatPanel() {
   const apiBaseUrl = useStore((s) => s.apiBaseUrl);
   const apiKey = useStore((s) => s.apiKey);
   const apiModel = useStore((s) => s.apiModel);
+  const fallbackModel = useStore((s) => s.fallbackModel);
+  const markModelUsed = useStore((s) => s.markModelUsed);
   const setSettingsOpen = useStore((s) => s.setSettingsOpen);
   const pushToast = useStore((s) => s.pushToast);
   const modelPricing = useStore((s) => s.modelPricing);
@@ -237,6 +239,17 @@ export default function ChatPanel() {
 
   const sendInChat = async (chatId, text, images = []) => {
     if (inFlightRef.current) return;
+    // Budget hard-limit (§8): block a new request once the enforced monthly
+    // budget is reached, with a clear message instead of silently spending.
+    if (useStore.getState().isOverBudget()) {
+      const b = useStore.getState().monthlyBudgetUSD;
+      pushToast({ type: "warning", message: `মাসিক বাজেট শেষ ($${b}). Settings → Usage-তে enforce বন্ধ করুন বা বাজেট বাড়ান।` });
+      const id2 = useStore.getState().createChat();
+      setActive(id2);
+      addMessage(id2, { id: "msg_" + Math.random().toString(36).slice(2), role: "user", content: text });
+      addMessage(id2, { id: "msg_" + Math.random().toString(36).slice(2), role: "assistant", content: "", error: "Monthly budget reached", errorDetail: `Enforced limit $${b} reached. Disable enforcement or raise the budget in Settings.` });
+      return;
+    }
     inFlightRef.current = true;
     setBusy(true);
 
@@ -268,9 +281,10 @@ export default function ChatPanel() {
       "ar-SA": "Always reply in Arabic (العربية, natural professional tone). Code stays English.",
     };
     const langRule = LANG_RULES[chatLanguage] || "";
-    const finalSystem = langRule
+    const finalSystem = (langRule
       ? `${systemPrompt || "You are a helpful assistant."}\n\nLANGUAGE RULE (must follow): ${langRule}`
-      : (systemPrompt || "You are a helpful assistant.");
+      : (systemPrompt || "You are a helpful assistant."))
+      + (useStore.getState().buildMemoryPrompt("") || "");
     let messagesForApi = [
       { role: "system", content: finalSystem },
       ...recentMessages.map((m) => {
@@ -538,14 +552,15 @@ export default function ChatPanel() {
             throw abortErr;
           }
         }
-        try {
+        let activeModel = apiModel;
+      try {
           res = await fetch("/api/chat", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               apiBaseUrl,
               apiKey,
-              model: apiModel,
+              model: activeModel,
               messages: messagesForApi,
               temperature: typeof temperature === "number" ? temperature : 0.7,
               stream: true,
@@ -562,6 +577,20 @@ export default function ChatPanel() {
           res = null;
           if (attempt === 2) throw netErr;
         }
+      }
+
+      // Directive §7 fallback model: if the primary model failed hard (and it's
+      // not an auth issue), try the configured fallback model once.
+      if ((!res || !res.ok) && fallbackModel && fallbackModel !== activeModel && res?.status !== 401) {
+        try {
+          const fb = await fetch("/api/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ apiBaseUrl, apiKey, model: fallbackModel, messages: messagesForApi, temperature: typeof temperature === "number" ? temperature : 0.7, stream: true, systemPrompt }),
+            signal: ctrl.signal,
+          });
+          if (fb.ok) { res = fb; activeModel = fallbackModel; markModelUsed?.(fallbackModel); }
+        } catch {}
       }
 
       if (!res || !res.ok) {

@@ -8,6 +8,9 @@ import { motion, AnimatePresence } from "motion/react";
 export default function ModelSelector() {
   const apiModel = useStore((s) => s.apiModel);
   const setSetting = useStore((s) => s.setSetting);
+  const recentModels = useStore((s) => s.recentModels);
+  const markModelUsed = useStore((s) => s.markModelUsed);
+  const pick = (id) => { setSetting("apiModel", id); markModelUsed(id); };
   const apiKey = useStore((s) => s.apiKey);
   const customModels = useStore((s) => s.customModels);
   const favorites = useStore((s) => s.favorites);
@@ -109,6 +112,27 @@ export default function ModelSelector() {
             </div>
 
             <div className="max-h-80 overflow-y-auto">
+              {recentModels?.length > 0 && (
+                <>
+                  <div className="px-3 pt-2 pb-1 text-[11px] uppercase tracking-wider" style={{ color: "var(--cb-muted)" }}>
+                    🕑 Recently used
+                  </div>
+                  {recentModels.filter((id) => !id.startsWith("http")).map((id) => {
+                    const m = allModels.find((x) => x.id === id) || { id, name: id, provider: "", context: 0, builtin: false };
+                    return (
+                      <ModelRow
+                        key={"recent-" + id}
+                        model={m}
+                        selected={m.id === apiModel}
+                        locked={!apiKey && !(apiBaseUrl.includes("11434") || apiBaseUrl.includes("1234"))}
+                        favorite={favorites.includes(m.id)}
+                        onSelect={() => { pick(m.id); setOpen(false); }}
+                        onFav={() => toggleFavorite(m.id)}
+                      />
+                    );
+                  })}
+                </>
+              )}
               {advanced.length > 0 && (
                 <>
                   <div className="px-3 pt-2 pb-1 text-[11px] uppercase tracking-wider flex items-center justify-between" style={{ color: "var(--cb-muted)" }}>
@@ -121,7 +145,7 @@ export default function ModelSelector() {
                       selected={m.id === apiModel}
                       locked={!apiKey && !(apiBaseUrl.includes("11434") || apiBaseUrl.includes("1234"))}
                       favorite={favorites.includes(m.id)}
-                      onSelect={() => { setSetting("apiModel", m.id); setOpen(false); }}
+                      onSelect={() => { pick(m.id); setOpen(false); }}
                       onFav={() => toggleFavorite(m.id)}
                     />
                   ))}
@@ -139,7 +163,7 @@ export default function ModelSelector() {
                       selected={m.id === apiModel}
                       locked={!apiKey && !(apiBaseUrl.includes("11434") || apiBaseUrl.includes("1234"))}
                       favorite={favorites.includes(m.id)}
-                      onSelect={() => { setSetting("apiModel", m.id); setOpen(false); }}
+                      onSelect={() => { pick(m.id); setOpen(false); }}
                       onFav={() => toggleFavorite(m.id)}
                     />
                   ))}
@@ -157,7 +181,7 @@ export default function ModelSelector() {
                       selected={m.id === apiModel}
                       locked={!apiKey && !(apiBaseUrl.includes("11434") || apiBaseUrl.includes("1234"))}
                       favorite={favorites.includes(m.id)}
-                      onSelect={() => { setSetting("apiModel", m.id); setOpen(false); }}
+                      onSelect={() => { pick(m.id); setOpen(false); }}
                       onFav={() => toggleFavorite(m.id)}
                     />
                   ))}
@@ -175,7 +199,7 @@ export default function ModelSelector() {
                       selected={m.id === apiModel}
                       locked={!apiKey && !(apiBaseUrl.includes("11434") || apiBaseUrl.includes("1234"))}
                       favorite={favorites.includes(m.id)}
-                      onSelect={() => { setSetting("apiModel", m.id); setOpen(false); }}
+                      onSelect={() => { pick(m.id); setOpen(false); }}
                       onFav={() => toggleFavorite(m.id)}
                     />
                   ))}

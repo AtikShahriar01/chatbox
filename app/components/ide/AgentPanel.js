@@ -29,6 +29,17 @@ const STATUS_META = {
   queued: { icon: CircleDashed, color: "#8b93a7" },
 };
 
+// §10 "intelligence" presets — curated instructions the general agent executes
+// using its existing tools (inspect_project, read, grep, write, edit, run_command).
+const SKILLS = [
+  { icon: "🔬", label: "Analyze", hint: "Project structure + dependencies + architecture overview", prompt: "Analyze this project: run inspect_project, list key files, and summarize the architecture, entry points, and dependencies. Then write a short ARCHITECTURE.md." },
+  { icon: "🧹", label: "Quality", hint: "Code review across the project", prompt: "Act as a strict code-quality reviewer: scan the main source files, identify code smells, duplication, dead code, and weak error handling. List concrete fixes with file:line, then apply the safe ones and re-run any build/tests to verify nothing broke." },
+  { icon: "🛡️", label: "Security", hint: "Security review", prompt: "Security-review this project: look for secrets committed, unsafe input handling (injection, path traversal), unvalidated URLs/SSRF, XSS in rendered HTML, and insecure defaults. Report findings by severity (file:line + why + fix), then apply the low-risk fixes and verify." },
+  { icon: "🐞", label: "Fix errors", hint: "Find & fix build/test errors", prompt: "Run the build and tests, capture every error, and fix them one by one. After each fix, re-run to confirm. Repeat until build and tests pass; then report what you changed." },
+  { icon: "🧪", label: "Add tests", hint: "Generate & run tests", prompt: "Add a sensible automated test suite for the core modules: inspect the code, write unit tests using the project's framework (or a minimal one if none), run them, and fix failures until they pass." },
+  { icon: "♻️", label: "Refactor", hint: "Safe refactor", prompt: "Refactor the most complex/hard-to-read module for clarity without changing behavior: extract functions, improve names, reduce duplication. Run build/tests before and after to prove behavior is unchanged." },
+  { icon: "📖", label: "Docs", hint: "Generate documentation", prompt: "Write documentation for this project: a README with setup + usage, and doc comments for the main public functions. Read the code first, base everything on what's actually there, and don't invent APIs." },
+];
 const MODES = [
   { key: "ask", label: "Ask", desc: "প্রতিটা লেখা/কমান্ডে অনুমতি চাইবে", icon: Lock },
   { key: "safe", label: "Safe", desc: "পড়া অটো, লেখা/কমান্ডে অনুমতি চাইবে", icon: ShieldCheck },
@@ -37,6 +48,8 @@ const MODES = [
 
 export default function AgentPanel({ workspace, agentRef, onRunCommand }) {
   const tasks = useIde((s) => s.tasks);
+  const taskHistory = useIde((s) => s.taskHistory);
+  const clearTaskHistory = useIde((s) => s.clearTaskHistory);
   const activity = useIde((s) => s.activity);
   const bridge = useIde((s) => s.bridge);
   const setBridge = useIde((s) => s.setBridge);
@@ -49,6 +62,8 @@ export default function AgentPanel({ workspace, agentRef, onRunCommand }) {
 
   const store = useStore();
   const [goal, setGoal] = useState("");
+  const consoleRef = useRef(null);
+  const textareaFocus = () => { try { consoleRef.current?.focus(); } catch {} };
   const [rightTab, setRightTab] = useState("agent"); // agent | changes
   const [runningId, setRunningId] = useState(null);
   const [paused, setPaused] = useState(false);
@@ -166,6 +181,7 @@ export default function AgentPanel({ workspace, agentRef, onRunCommand }) {
         {[
           { k: "agent", label: "Console" },
           { k: "changes", label: `Changes${aiPending ? ` (${aiPending})` : ""}` },
+          { k: "history", label: `History${taskHistory?.length ? ` (${taskHistory.length})` : ""}` },
         ].map((t) => (
           <button key={t.k} onClick={() => setRightTab(t.k)}
             className={`rounded-lg px-2.5 py-1 text-[11.5px] font-medium ${rightTab === t.k ? "bg-white/10 text-[var(--txt)]" : "text-[var(--txt-dim)] hover:bg-white/5"}`}>
@@ -173,6 +189,31 @@ export default function AgentPanel({ workspace, agentRef, onRunCommand }) {
           </button>
         ))}
       </div>
+
+      {rightTab === "history" && (
+        <div className="min-h-0 flex-1 overflow-auto p-3 text-[12px]">
+          {!taskHistory?.length && <p className="text-[var(--txt-dim)]">এখনো কোনো agent টাস্ট সম্পন্ন হয়নি — টাস্ট শেষ হলে এখানে history জমা হবে (reload-ও থাকে)।</p>}
+          {(taskHistory || []).map((h, i) => (
+            <div key={h.id || i} className="mb-2 rounded-xl border border-white/5 bg-white/[0.03] p-2.5">
+              <div className="flex items-center gap-2">
+                <span className="shrink-0">{h.status === "completed" ? "✅" : h.status === "failed" ? "❌" : "⏹"}</span>
+                <span className="min-w-0 flex-1 truncate">{h.title}</span>
+                <button onClick={() => { setGoal(h.title); setRightTab("agent"); }} title="আবার চালান" className="shrink-0 rounded px-1.5 py-0.5 text-[10px] hover:bg-white/10">↻ Retry</button>
+              </div>
+              <div className="mt-1 flex flex-wrap gap-x-3 text-[10px] text-[var(--txt-dim)]">
+                <span>{new Date(h.finishedAt || h.startedAt || Date.now()).toLocaleString()}</span>
+                {h.files?.length ? <span>📄 {h.files.length}</span> : null}
+                {h.commands?.length ? <span>⚙ {h.commands.length}</span> : null}
+                {h.todos?.length ? <span>☑ {h.todos.filter((t) => t.status === "done").length}/{h.todos.length}</span> : null}
+              </div>
+              {h.summary && <p className="mt-1 line-clamp-2 text-[11px]" style={{ color: "var(--txt-dim)" }}>{h.summary}</p>}
+            </div>
+          ))}
+          {taskHistory?.length > 0 && (
+            <button onClick={() => clearTaskHistory()} className="mt-1 rounded px-2 py-1 text-[11px] text-[var(--txt-dim)] hover:bg-white/5">Clear history</button>
+          )}
+        </div>
+      )}
 
       {rightTab === "changes" ? (
         <div className="min-h-0 flex-1">
@@ -224,8 +265,17 @@ export default function AgentPanel({ workspace, agentRef, onRunCommand }) {
 
       {/* console input */}
       <div className="border-b border-white/5 p-3">
+        <div className="mb-1.5 flex flex-wrap gap-1">
+          {SKILLS.map((sk) => (
+            <button key={sk.label} title={sk.hint} onClick={() => { setGoal(sk.prompt); textareaFocus?.(); }}
+              className="rounded-md px-1.5 py-0.5 text-[10.5px] font-medium text-[var(--txt-dim)] hover:bg-white/10 hover:text-[var(--txt)]"
+              style={{ border: "1px solid var(--border)" }}>
+              {sk.icon} {sk.label}
+            </button>
+          ))}
+        </div>
         <div className="rounded-xl border border-white/10 bg-black/25 p-2 focus-within:border-[var(--accent)]/60">
-          <textarea
+          <textarea ref={consoleRef}
             value={goal} onChange={(e) => setGoal(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) run(); }}
             rows={2} placeholder="Describe a task for the agent… (Ctrl+Enter to run)&#10;e.g. Fix all build errors and run tests"

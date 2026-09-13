@@ -29,9 +29,9 @@ jobs:
       - name: Production build
         run: npx next build
 
-      - name: SSE parser unit tests (workspace root)
+      - name: §20 offline test pyramid (unit + parser; needs no server)
         working-directory: .
-        run: node .selftest/parser-tests.mjs
+        run: node .selftest/run-all.mjs --offline
 
       - name: Dependency audit (report; known accepted risks are documented in docs/SECURITY_AUDIT.md)
         run: npm audit --audit-level=critical || true

@@ -8,7 +8,7 @@
 import {
   getAuthRecord, saveAuthRecord, verifyPin,
   createSessionToken, sessionCookieHeader, clearCookieHeader,
-  sessionFromRequest, verifySessionToken,
+  sessionFromRequest, verifySessionToken, isAuthed, bumpTokenVersion,
 } from "../../../lib/session";
 import { guard } from "../../../lib/guard";
 
@@ -76,6 +76,28 @@ export async function POST(req) {
     return new Response(JSON.stringify({ ok: true }), {
       headers: { "Content-Type": "application/json", "Set-Cookie": sessionCookieHeader(token, maxAgeSec) },
     });
+  }
+
+  if (action === "logout-all") {
+    if (!isAuthed(req)) return Response.json({ ok: false, error: "authentication required" }, { status: 401 });
+    const r = bumpTokenVersion(); // rotates version → every other cookie is now invalid
+    return new Response(JSON.stringify(r), {
+      status: r.ok ? 200 : 400,
+      headers: { "Content-Type": "application/json", "Set-Cookie": clearCookieHeader() },
+    });
+  }
+
+  if (action === "change-pin") {
+    // §16 recovery / rotation: must be signed in AND prove the current PIN;
+    // bumps the token version so changing the PIN also revokes all sessions.
+    if (!isAuthed(req)) return Response.json({ ok: false, error: "authentication required" }, { status: 401 });
+    const oldOk = verifyPin(String(body?.oldPin || ""));
+    if (!oldOk.ok) { attempts.fails += 1; return Response.json({ ok: false, error: "current PIN incorrect" }, { status: 401 }); }
+    attempts.fails = 0;
+    const newPin = String(body?.newPin || "");
+    if (!/^\d{4,8}$/.test(newPin)) return Response.json({ ok: false, error: "New PIN must be 4-8 digits" }, { status: 400 });
+    const r = bumpTokenVersion(newPin);
+    return Response.json(r, { status: r.ok ? 200 : 400, headers: { "Content-Type": "application/json" } });
   }
 
   return Response.json({ ok: false, error: "unknown action" }, { status: 400 });

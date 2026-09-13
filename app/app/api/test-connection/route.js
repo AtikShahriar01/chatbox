@@ -8,7 +8,7 @@ import {
   buildOllamaRequest,
   buildCohereRequest,
 } from "../../../lib/providers";
-import { guard } from "../../../lib/guard";
+import { guard, providerUrlGuard } from "../../../lib/guard";
 import { requireSession } from "../../../lib/session";
 
 export const runtime = "nodejs";
@@ -43,6 +43,10 @@ export async function POST(req) {
   try { body = await req.json(); } catch { return Response.json({ ok: false, error: "Invalid JSON" }, { status: 400 }); }
   const { apiBaseUrl, apiKey, apiModel } = body || {};
   if (!apiBaseUrl || !apiModel) return Response.json({ ok: false, error: "Missing apiBaseUrl or apiModel" }, { status: 400 });
+  {
+    const urlBad = providerUrlGuard(String(apiBaseUrl));
+    if (urlBad) return Response.json({ ok: false, error: `apiBaseUrl rejected: ${urlBad}` }, { status: 400 });
+  }
 
   const provider = detectProvider(apiBaseUrl);
   let request;

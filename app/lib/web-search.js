@@ -53,10 +53,11 @@ export async function searchWeb(query, { limit = 6 } = {}) {
 // loopback/private/metadata targets so a crafted result can never make the
 // server read its own localhost services. (Limitation: hostname-level check;
 // a hostname resolving to a private IP after DNS is not caught.)
-const PRIVATE_HOST = /^(localhost|.*\.localhost|127\.|10\.|192\.168\.|169\.254\.|0\.0\.0\.0|\[::1\]|\[fc|\[fd|metadata\.google\.internal$)/i;
-function isPrivateHost(url) {
+import { normalizeHostIp } from "./guard.js";
+const PRIVATE_HOST = /^(localhost|.*\.localhost|127\.|10\.|192\.168\.|169\.254\.|0\.0\.0\.0|::1|fe80:|f[cd][0-9a-f]{2}:|metadata\.google\.internal$)/i;
+export function isPrivateHost(url) {
   try {
-    const host = new URL(url).hostname.toLowerCase();
+    const host = normalizeHostIp(new URL(url).hostname.toLowerCase());
     const m172 = host.match(/^172\.(\d+)\./);
     return PRIVATE_HOST.test(host) || (m172 && Number(m172[1]) >= 16 && Number(m172[1]) <= 31);
   } catch { return true; }
@@ -83,14 +84,36 @@ export async function fetchPageText(url, { maxChars = 4500 } = {}) {
   return text.slice(0, maxChars);
 }
 
-// One call: search + enrich top results with page text.
-export async function searchWithPages(query, { limit = 5, fetchTop = 3 } = {}) {
-  const hits = await searchWeb(query, { limit });
+// One call: search + enrich. §15: dedup by URL, relevance ranking, domain filter.
+function normUrl(u) {
+  try { const x = new URL(u); return (x.host + x.pathname).replace(/\/$/, "").toLowerCase(); } catch { return u; }
+}
+function rankResult(h, terms) {
+  const hay = (h.title + " " + (h.snippet || "")).toLowerCase();
+  let score = 0;
+  for (const t of terms) if (t && hay.includes(t)) score++;
+  return score;
+}
+export async function searchWithPages(query, { limit = 5, fetchTop = 3, includeDomains = [], excludeDomains = [] } = {}) {
+  const hits0 = await searchWeb(query, { limit: Math.min(limit + 8, 15) });
+  const seen = new Set();
+  const terms = query.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+  const filtered = hits0.filter((h) => {
+    let d = "";
+    try { d = new URL(h.url).hostname.toLowerCase(); } catch { return false; }
+    if (excludeDomains.some((x) => d === x || d.endsWith("." + x))) return false;
+    if (includeDomains.length && !includeDomains.some((x) => d === x || d.endsWith("." + x))) return false;
+    const key = normUrl(h.url);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).map((h) => ({ ...h, _rank: rankResult(h, terms) })).sort((a, b) => b._rank - a._rank).slice(0, limit);
   const enriched = await Promise.all(
-    hits.map(async (h, i) => {
-      if (i >= fetchTop) return { ...h, pageText: "" };
-      try { return { ...h, pageText: await fetchPageText(h.url) }; }
-      catch { return { ...h, pageText: "" }; }
+    filtered.map(async (h, i) => {
+      const { _rank, ...rest } = h;
+      if (i >= fetchTop) return { ...rest, pageText: "" };
+      try { return { ...rest, pageText: await fetchPageText(h.url) }; }
+      catch { return { ...rest, pageText: "" }; }
     })
   );
   return enriched;

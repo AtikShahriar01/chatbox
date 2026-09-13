@@ -1,7 +1,7 @@
 // Server-side session authentication (security directive §4).
 // The PIN is verified SERVER-side; the browser only ever holds an HMAC-signed
-// session cookie (HttpOnly, SameSite=Strict). Client-side checks in lib/auth.js
-// are UI convenience only — the API layer enforces the real gate via guard().
+// session cookie (HttpOnly, SameSite=Strict). There is no client-side auth
+// shim — the API layer enforces the real gate via guard() + requireSession().
 
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -41,14 +41,23 @@ export function getAuthRecord() {
   }
 }
 
+const SCRYPT = { N: 16384, r: 8, p: 1 };
+function scryptPin(pin, salt, len) {
+  return crypto.scryptSync(pin, salt, len, SCRYPT);
+}
+function legacySha(pin, salt) {
+  return crypto.createHash("sha256").update(salt + ":" + pin).digest();
+}
+
 export function saveAuthRecord(pin, displayName = "Local User") {
   if (!/^\d{4,8}$/.test(pin)) return { ok: false, error: "PIN must be 4-8 digits" };
   ensureAuthDir();
   const salt = crypto.randomBytes(16).toString("hex");
-  const pinHash = crypto.createHash("sha256").update(salt + ":" + pin).digest("hex");
+  const pinHash = scryptPin(pin, salt, 32).toString("hex");
+  const prev = getAuthRecord();
   fs.writeFileSync(AUTH_FILE, JSON.stringify({
-    salt, pinHash, displayName: String(displayName || "Local User").slice(0, 40),
-    createdAt: new Date().toISOString(),
+    salt, pinHash, algo: "scrypt", displayName: String(displayName || "Local User").slice(0, 40),
+    tokenVersion: Number(prev?.tokenVersion) || 0, createdAt: prev?.createdAt || new Date().toISOString(),
   }, null, 2));
   return { ok: true };
 }
@@ -57,31 +66,61 @@ export function verifyPin(pin) {
   const rec = getAuthRecord();
   if (!rec) return { ok: false, error: "not registered" };
   if (!/^\d{4,8}$/.test(pin || "")) return { ok: false, error: "bad pin" };
-  const hash = crypto.createHash("sha256").update(rec.salt + ":" + pin).digest("hex");
-  const ok = crypto.timingSafeEqual(Buffer.from(hash), Buffer.from(rec.pinHash));
+  const expected = Buffer.from(rec.pinHash, "hex");
+  const candidate = rec.algo === "scrypt"
+    ? scryptPin(pin, rec.salt, expected.length)
+    : legacySha(pin, rec.salt);
+  const ok = candidate.length === expected.length && crypto.timingSafeEqual(candidate, expected);
+  if (ok && rec.algo !== "scrypt") { try { saveAuthRecord(pin, rec.displayName); } catch {} }
   return ok ? { ok: true } : { ok: false, error: "wrong pin" };
 }
 
-// Session token: "<expiry>.<hmac>" — the HMAC binds the expiry to the server
-// secret, so a forged or expired cookie is useless (§4: session hijacking,
-// token theft).
+// Session token: "<expiry>.<version>.<hmac>". The HMAC binds expiry AND the
+// token version to the server secret → a forged/expired cookie is useless, and
+// bumping the version (logout-all / recovery) revokes every outstanding cookie
+// without a per-token store. Legacy 2-part cookies pass only while version === 0.
+function currentVersion() {
+  return Number(getAuthRecord()?.tokenVersion) || 0;
+}
+function signToken(exp, ver) {
+  return crypto.createHmac("sha256", getSecret()).update("chatbox-session|" + exp + "|" + ver).digest("hex");
+}
 export function createSessionToken() {
   const exp = Date.now() + SESSION_TTL_MS;
-  const sig = crypto.createHmac("sha256", getSecret()).update("chatbox-session|" + exp).digest("hex");
-  return { token: `${exp}.${sig}`, maxAgeSec: Math.floor(SESSION_TTL_MS / 1000) };
+  const ver = currentVersion();
+  return { token: `${exp}.${ver}.${signToken(exp, ver)}`, maxAgeSec: Math.floor(SESSION_TTL_MS / 1000) };
 }
-
 export function verifySessionToken(token) {
   if (!token || typeof token !== "string") return false;
-  const dot = token.indexOf(".");
-  if (dot < 1) return false;
-  const exp = Number(token.slice(0, dot));
-  const sig = token.slice(dot + 1);
+  const parts = token.split(".");
+  const exp = Number(parts[0]);
   if (!Number.isFinite(exp) || exp < Date.now()) return false;
-  const expected = crypto.createHmac("sha256", getSecret()).update("chatbox-session|" + exp).digest("hex");
-  const a = Buffer.from(sig);
-  const b = Buffer.from(expected);
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
+  if (parts.length === 3) {
+    if (Number(parts[1]) !== currentVersion()) return false;
+    const a = Buffer.from(parts[2]); const b = Buffer.from(signToken(exp, Number(parts[1])));
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  }
+  if (parts.length === 2) {
+    if (currentVersion() !== 0) return false; // anything revoked ⇒ legacy dead
+    const a = Buffer.from(parts[1]); const b = Buffer.from(crypto.createHmac("sha256", getSecret()).update("chatbox-session|" + exp).digest("hex"));
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  }
+  return false;
+}
+// §16 logout-all / recovery: bump version (invalidates all cookies); optionally
+// set a new PIN in the same atomic write.
+export function bumpTokenVersion(newPin) {
+  const rec = getAuthRecord();
+  if (!rec) return { ok: false, error: "not registered" };
+  if (newPin && !/^\d{4,8}$/.test(newPin)) return { ok: false, error: "PIN must be 4-8 digits" };
+  const salt = newPin ? crypto.randomBytes(16).toString("hex") : rec.salt;
+  const pinHash = newPin ? scryptPin(newPin, salt, 32).toString("hex") : rec.pinHash;
+  const nextVer = currentVersion() + 1;
+  fs.writeFileSync(AUTH_FILE, JSON.stringify({
+    salt, pinHash, algo: "scrypt", displayName: rec.displayName || "Local User",
+    tokenVersion: nextVer, createdAt: rec.createdAt, updatedAt: new Date().toISOString(),
+  }, null, 2));
+  return { ok: true, tokenVersion: nextVer };
 }
 
 export function sessionCookieHeader(token, maxAgeSec) {

@@ -56,6 +56,45 @@ function originAllowed(origin) {
   return false;
 }
 
+// Provider-URL guard (security directive §11 — SSRF via user-supplied base
+// URL). The app is BYOK: users legitimately point it at localhost Ollama /
+// LM Studio / LAN llama.cpp servers, so loopback+private must STAY allowed.
+// What must never be reachable is cloud instance-metadata endpoints: an
+// attacker who gets the server to request them could exfiltrate tokens.
+// Fail closed on anything we cannot parse.
+
+// Normalize a URL hostname so hex-compressed IPv4-mapped IPv6 literals
+// ([::ffff:a9fe:a9fe] = 169.254.169.254, the Node/WHATWG serialization of
+// [::ffff:169.254.169.254]) can't dodge the dotted-quad checks below.
+export function normalizeHostIp(host) {
+  let h = String(host || "").replace(/^\[|\]$/g, "").toLowerCase();
+  let m = h.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (m) {
+    const a = parseInt(m[1], 16); const b = parseInt(m[2], 16);
+    h = [a >> 8 & 255, a & 255, b >> 8 & 255, b & 255].join(".");
+  } else {
+    m = h.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    if (m) h = m[1];
+  }
+  if (h === "0:0:0:0:0:0:0:1") h = "::1";
+  return h;
+}
+
+export function providerUrlGuard(raw) {
+  if (typeof raw !== "string" || !raw || raw.length > 500) return "invalid url";
+  let u;
+  try { u = new URL(raw); } catch { return "unparseable url"; }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return "http(s) only";
+  const host = u.hostname.toLowerCase();
+  if (host === "metadata.google.internal" || host.endsWith(".metadata.google.internal")) return "metadata endpoint blocked";
+  const norm = normalizeHostIp(host);
+  // link-local (169.254.0.0/16 + IPv6 fe80::/10) hosts IMDS on AWS/GCP/Azure
+  if (/^169\.254\./.test(norm) || /^fe80(:|0?0?[0-9a-f]*:)/.test(norm)) return "link-local metadata blocked";
+  // Alibaba IMDS
+  if (norm === "100.100.100.200") return "metadata endpoint blocked";
+  return null; // ok
+}
+
 // Only these bridge ops may be forwarded through /api/pc (nothing arbitrary).
 export const ALLOWED_PC_OPS = new Set([
   "status", "pending", "workspace", "/workspace", "mode", "audit", "approve", "deny",

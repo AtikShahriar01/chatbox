@@ -3,14 +3,29 @@
 // Safe: destructive ops are confined to .selftest/sec-demo; denylist tests are
 // blocked by design. Session: the suite registers its own account if none
 // exists, or (same trust domain) signs a cookie from the server secret file.
-import { execSync } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // self-locating: works from any drive/folder the workspace is moved to
 const WS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+// FUNC streaming test needs the mock provider — start one if absent so the
+// suite is self-sufficient (previously an unstarted mock showed as a false
+// 24/25 regression).
+async function portOpen(p) {
+  return new Promise((res) => {
+    const s = net.connect(p, "127.0.0.1");
+    s.setTimeout(600);
+    s.on("connect", () => { s.destroy(); res(true); });
+    s.on("error", () => res(false));
+    s.on("timeout", () => { s.destroy(); res(false); });
+  });
+}
+let mockChild = null;
 
 const HDR = { "Content-Type": "application/json", "x-chatbox-client": "chatbox-web-1" };
 let COOKIE = "";
@@ -53,10 +68,12 @@ const authed = fs.existsSync(AUTH_DIR + "\\auth.json");
   } else {
     // same trust domain: sign a session from the server secret (local file)
     const secret = fs.readFileSync(AUTH_DIR + "\\session-secret", "utf8").trim();
+    let ver = 0;
+    try { ver = Number(JSON.parse(fs.readFileSync(AUTH_DIR + "\\auth.json", "utf8")).tokenVersion) || 0; } catch {}
     const exp = Date.now() + 3600_000;
-    const sig = crypto.createHmac("sha256", secret).update("chatbox-session|" + exp).digest("hex");
-    COOKIE = `chatbox_session=${exp}.${sig}`;
-    console.log("[setup] session cookie forged from server secret (local file access)");
+    const sig = crypto.createHmac("sha256", secret).update("chatbox-session|" + exp + "|" + ver).digest("hex");
+    COOKIE = `chatbox_session=${exp}.${ver}.${sig}`;
+    console.log("[setup] 3-part session cookie forged from server secret (version " + ver + ")");
   }
 
   // ---------- AUTH: unauthenticated request must fail ----------
@@ -161,10 +178,15 @@ const authed = fs.existsSync(AUTH_DIR + "\\auth.json");
   record("L9", "rate limiter kicks in within 14 calls (12/min cap)", hit429 > 0 && hit429 <= 14, `first 429 at request #${hit429 || "none"} (≤14 = limiter active; exact slot shifts with earlier calls)`);
 
   // ---------- happy path: legit chat still streams ----------
+  if (!(await portOpen(18787))) {
+    mockChild = spawn(process.execPath, [path.join(WS, ".selftest", "mock-provider.js")], { cwd: path.join(WS, ".selftest"), stdio: "ignore", windowsHide: true });
+    await new Promise((r) => setTimeout(r, 800));
+  }
   r = await post("/api/chat", { apiBaseUrl: "http://127.0.0.1:18787/v1", apiKey: "k", model: "mock-fast", stream: true, messages: [{ role: "user", content: "hi" }] });
   const txt = await r.text;
   const content = [...txt.matchAll(/"content":"([^"]*)"/g)].map((m) => m[1]).join("");
   record("FUNC", "legit streaming chat still works", r.status === 200 && content === "Hello from mock provider", `reply=${JSON.stringify(content)}`);
+  if (mockChild) { try { mockChild.kill(); } catch {} }
 
   const passed = results.filter((x) => x.pass).length;
   console.log(`\n=== ${passed}/${results.length} REAL-TIME SECURITY TESTS PASSED ===`);

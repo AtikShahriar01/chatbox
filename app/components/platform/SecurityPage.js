@@ -4,9 +4,25 @@
 // center with real state, sensitive action log, emergency stop.
 
 import { useEffect, useState, useCallback } from "react";
-import { ShieldCheck, ShieldAlert, OctagonX, Lock, Globe, KeyRound } from "lucide-react";
+import { ShieldCheck, ShieldAlert, OctagonX, Lock, Globe, KeyRound, LogOut, Check } from "lucide-react";
 import { pc } from "@/lib/pc";
 import { useIde } from "@/lib/ide-store";
+import { useStore } from "@/lib/store";
+
+// §17 Security Center — live posture (each row reflects a real control we ship).
+function usePosture(bridgeConnected) {
+  const apiKey = useStore((s) => s.apiKey);
+  const sessionKeyOnly = useStore((s) => s.sessionKeyOnly);
+  return [
+    { label: "API Key", ok: !!apiKey, detail: sessionKeyOnly ? "Session-only (never stored on disk)" : "Stored locally in this browser", note: "BYOK — key goes only to your chosen provider" },
+    { label: "PC Bridge", ok: bridgeConnected, detail: bridgeConnected ? "Reachable · token-protected (localhost only)" : "Bridge offline", note: "token never sent to browser" },
+    { label: "Workspace", ok: true, detail: "Locked to chosen folder", note: "path confinement + symlink check" },
+    { label: "Terminal", ok: true, detail: "Restricted", note: "idle/max-runtime + denylist + output cap" },
+    { label: "Session", ok: true, detail: "HttpOnly · SameSite=Strict · HMAC", note: "scrypt PIN · server-side verify" },
+    { label: "SSRF Protection", ok: true, detail: "Enabled", note: "metadata + private-IP + redirect-hop blocked" },
+    { label: "Audit Log", ok: true, detail: "Enabled · structured", note: "every action logged (JSONL)" },
+  ];
+}
 
 const PERMS = [
   { label: "Workspace Read", scope: "workspace-only", risk: "low", desc: "confine() সব read op কে workspace-এর ভেতরে আটকে দেয়; agent-bridge zone blocked" },
@@ -25,15 +41,29 @@ export default function SecurityPage() {
   const [lines, setLines] = useState([]);
   const [mode, setMode] = useState("ask");
   const [stopped, setStopped] = useState(false);
+  const [bridge, setBridge] = useState(false);
   const activity = useIde((s) => s.activity);
+  const posture = usePosture(bridge);
+  const crit = PERMS.filter((p) => p.risk === "critical").length;
+  const hi = PERMS.filter((p) => p.risk === "high").length;
+  const med = PERMS.filter((p) => p.risk === "medium").length;
+  const prot = posture.filter((p) => p.ok).length;
+
+  const authPost = async (action, extra = {}) => {
+    const r = await fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, ...extra }) });
+    return r.json().catch(() => ({ ok: r.ok }));
+  };
+  const logoutAll = async () => { if (!window.confirm("সব session revoke করবেন? অন্য ট্যাব/ডিভাইস থেকে লগআউট হয়ে যাবে।")) return; const r = await authPost("logout-all"); useStore.getState().pushToast({ type: r.ok ? "success" : "error", message: r.ok ? "সব session revoke হয়েছে — আবার লগইন লাগবে" : "ব্যর্থ" }); if (r.ok) setTimeout(() => { location.href = "/login"; }, 800); };
+  const changePin = async () => { const old = window.prompt("Current PIN:"); if (old == null) return; const np = window.prompt("New PIN (4-8 digits):"); if (!np) return; const r = await authPost("change-pin", { oldPin: old.trim(), newPin: np.trim() }); useStore.getState().pushToast({ type: r.ok ? "success" : "error", message: r.ok ? "PIN বদলে গেছে · সব পুরনো session revoke হয়েছে" : (r.error || "ব্যর্থ") }); };
 
   const load = useCallback(async () => {
     const [s, a] = await Promise.all([
       pc("status").catch(() => null),
-      fetch("/api/pc", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: "audit", limit: 150 }) }).then((r) => r.json()).catch(() => null),
+      fetch("/api/pc", { method: "POST", headers: { "Content-Type": "application/json", "x-chatbox-client": "chatbox-web-1" }, body: JSON.stringify({ op: "audit", limit: 150 }) }).then((r) => r.json()).catch(() => null),
     ]);
     if (s?.mode) setMode(s.mode);
-    setLines((a?.lines || []).slice().reverse());
+    setBridge(!!s?.ok);
+    setLines((a?.lines || []).slice().reverse().map((l) => { try { const j = JSON.parse(l); return `${new Date(j.t).toLocaleTimeString()} ${j.kind} ${j.detail || ""}${j.extra ? " · " + j.extra : ""}`; } catch { return l; } }));
   }, []);
   useEffect(() => { load(); const iv = setInterval(load, 5000); return () => clearInterval(iv); }, [load]);
 
@@ -59,6 +89,34 @@ export default function SecurityPage() {
           <Lock size={11} /> mode: {mode}
         </span>
       </div>
+
+      {/* §17 Security Center — posture matrix */}
+      <section className="rounded-2xl border p-4" style={{ borderColor: "var(--border)", background: "var(--panel-bg)" }}>
+        <div className="mb-3 flex items-center gap-2">
+          <h2 className="flex items-center gap-1.5 text-[13px] font-bold"><ShieldCheck size={14} className="text-[var(--accent)]" /> Security Center</h2>
+          <span className="ml-auto text-[10.5px]" style={{ color: "var(--txt-dim)" }}>{prot}/{posture.length} protected</span>
+        </div>
+        <div className="grid gap-1.5 sm:grid-cols-2">
+          {posture.map((p) => (
+            <div key={p.label} className="flex items-start gap-2 rounded-lg px-3 py-2" style={{ background: "color-mix(in srgb, var(--surface) 55%, transparent)" }}>
+              <span className="mt-0.5 shrink-0">{p.ok ? <Check size={13} className="text-emerald-400" /> : <OctagonX size={13} style={{ color: "var(--err)" }} />}</span>
+              <div className="min-w-0">
+                <p className="text-[12px] font-semibold" style={{ color: "var(--txt)" }}>{p.label}: <span style={{ color: p.ok ? "var(--ok)" : "var(--err)" }}>{p.ok ? "Protected" : "Down"}</span></p>
+                <p className="text-[10.5px]" style={{ color: "var(--txt-dim)" }}>{p.detail} · {p.note}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="rounded px-2 py-0.5 text-[10px] font-bold" style={{ background: "color-mix(in srgb,var(--err) 15%,transparent)", color: "var(--err)" }}>Critical {crit}</span>
+          <span className="rounded px-2 py-0.5 text-[10px] font-bold" style={{ background: "color-mix(in srgb,var(--warn) 15%,transparent)", color: "var(--warn)" }}>High {hi}</span>
+          <span className="rounded px-2 py-0.5 text-[10px] font-bold" style={{ background: "color-mix(in srgb,var(--accent) 15%,transparent)", color: "var(--accent)" }}>Medium {med}</span>
+          <div className="ml-auto flex gap-2">
+            <button onClick={changePin} className="cb-focus rounded-lg border px-2.5 py-1 text-[11px]" style={{ borderColor: "var(--border)" }}><KeyRound size={11} className="mr-1 inline" /> Change PIN</button>
+            <button onClick={logoutAll} className="cb-focus rounded-lg border px-2.5 py-1 text-[11px]" style={{ borderColor: "var(--border)", color: "var(--err)" }}><LogOut size={11} className="mr-1 inline" /> Logout all</button>
+          </div>
+        </div>
+      </section>
 
       {/* emergency stop */}
       <section className="rounded-2xl border p-4" style={{ borderColor: "color-mix(in srgb, var(--err) 35%, transparent)", background: "color-mix(in srgb, var(--err) 6%, transparent)" }}>

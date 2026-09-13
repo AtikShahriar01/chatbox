@@ -25,6 +25,7 @@
   <img src="https://img.shields.io/badge/Privacy-Local--first-success?style=flat-square" alt="Privacy">
   <img src="https://img.shields.io/badge/Models-OpenAI%20%7C%20Claude%20%7C%20Gemini%20%7C%20Ollama-blue?style=flat-square" alt="Models">
   <img src="https://img.shields.io/badge/Security-5--Layer-important?style=flat-square" alt="Security">
+  <img src="https://img.shields.io/badge/Tests-172_checks_green-brightgreen?style=flat-square" alt="Tests">
   <img src="https://img.shields.io/badge/Platform-Windows-green?style=flat-square" alt="Platform">
 </p>
 
@@ -138,7 +139,8 @@ A visual tour of the premium dark-themed interfaces built into Chatbox:
 | **AI Routing** | Multi-provider adapters (OpenAI / Anthropic / Google / Cohere / Ollama) |
 | **PC Bridge** | Node.js HTTP server (localhost:8765), token-authenticated |
 | **Runtime** | Bundled portable Node.js + Python (no system install needed) |
-| **Security** | Host/Origin gates, HMAC session cookies, CSP, rate limits, op whitelist, exec denylist, audit log |
+| **Security** | Host/Origin gates, HMAC session cookies (scrypt PIN + token rotation), CSP, rate limits, op whitelist, exec denylist, provider-URL SSRF guard, symlink-safe path confinement, audit log |
+| **Testing** | §20 pyramid: unit · parser · integration · security-live · security-deep · e2e — **172 checks** via `node .selftest/run-all.mjs` |
 
 ---
 
@@ -147,8 +149,8 @@ A visual tour of the premium dark-themed interfaces built into Chatbox:
 | Feature | **Chatbox** | ChatGPT Desktop | Claude Desktop | Generic Web Chat |
 | :--- | :---: | :---: | :---: | :---: |
 | **Fully local / self-hosted** | ✅ | ❌ | ❌ | ❌ |
-| **Bring your own key (any provider)** | ✅ | ❌ |  | ⚠️ Single |
-| **Built-in code IDE + terminal** | ✅ | ❌ | ❌ |  |
+| **Bring your own key (any provider)** | ✅ | ❌ | ❌ | ⚠️ Single |
+| **Built-in code IDE + terminal** | ✅ | ❌ | ❌ | ❌ |
 | **Autonomous agent that edits & runs on your PC** | ✅ | ⚠️ Limited | ⚠️ Limited | ❌ |
 | **Free local models (Ollama)** | ✅ | ❌ | ❌ | ❌ |
 | **5-layer security + audit log** | ✅ | ❌ | ❌ | ❌ |
@@ -194,13 +196,15 @@ Double-click one launcher:
 
 ## 🛡️ Security & Permission Model
 
-Chatbox uses **defense-in-depth** — five independent layers (full write-up in [SECURITY.md](SECURITY.md) and [docs/SECURITY_AUDIT.md](docs/SECURITY_AUDIT.md)):
+Chatbox uses **defense-in-depth** — five independent layers plus a layered regression-test pyramid (full write-ups: [docs/SECURITY.md](docs/SECURITY.md), [docs/SECURITY_AUDIT.md](docs/SECURITY_AUDIT.md), [docs/TESTING.md](docs/TESTING.md)):
 
 1. 🌐 **Network** — server binds to localhost (LAN only in `start-server.bat`); Host allowlist blocks DNS rebinding.
-2. 🔑 **Auth** — server-side session (HttpOnly, SameSite=Strict, HMAC-signed cookie); PIN verified server-side.
+2. 🔑 **Auth** — server-side session (HttpOnly, SameSite=Strict, HMAC-signed cookie); PIN verified server-side with scrypt; token-version rotation powers logout-all / change-PIN revocation; 5-strike brute-force lockout.
 3. 🧯 **API** — same-origin + custom-header checks, per-route rate limits, body-size caps, strict bridge op-whitelist.
-4. 🖥️ **PC bridge** — token never reaches the browser; path confinement to your workspace, credential denylist, output secret-redaction.
-5. 🧼 **Content** — AI output is markdown-sanitized and locked down by a strict Content-Security-Policy.
+4. 🖥️ **PC bridge** — token never reaches the browser; **symlink-safe** path confinement (a junction inside the workspace cannot smuggle ops out), credential exec-denylist, output secret-redaction, append-only audit log.
+5. 🧼 **Content** — AI output is markdown-sanitized under a strict CSP; provider base-URLs pass a SSRF guard (cloud-metadata + IPv4-mapped-IPv6 forms rejected — your local Ollama stays allowed).
+
+🧪 **§20 Test pyramid** — every layer above is pinned by `node .selftest/run-all.mjs`: 172 checks across unit, SSE-parser, integration, two security batteries (forged-cookie auth bypass, SSRF, path traversal, symlink escape, command injection, CSRF incl. raw-socket Host rebinding, XSS headers, rate-limit bypass) and E2E journeys with a full live agent workflow. CI runs the offline half on every push.
 
 **Agent permission modes:** 🔒 *Ask* (every action needs approval) · 🛡️ *Safe* (reads auto) · ⚡ *Full Access* (automatic, use with care).
 
@@ -258,7 +262,7 @@ Yes — every script self-locates, so it works from any drive. Delete <code>.aut
 
 Contributions are welcome! Please:
 1. Fork the repository and create a feature branch.
-2. Run the test suite: `node .selftest/parser-tests.mjs` and `node .selftest/security-live-tests.mjs`.
+2. Run the test pyramid: `node .selftest/run-all.mjs` (with app + bridge running), or the offline half with `node .selftest/run-all.mjs --offline`. Coverage map: [docs/TESTING.md](docs/TESTING.md).
 3. Follow the security policy in [docs/SECURITY-DIRECTIVE.md](docs/SECURITY-DIRECTIVE.md).
 4. Open a pull request with a clear description.
 

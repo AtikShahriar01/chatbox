@@ -33,3 +33,9 @@ _trash/
 # ---- misc ----
 .DS_Store
 Thumbs.db
+
+# §20 suite scratch dirs (self-cleaned by suites; ignore as belt & braces)
+.selftest/sec-demo2/
+.selftest/itest/
+.selftest/e2e-ide/
+.selftest/probe-dir/

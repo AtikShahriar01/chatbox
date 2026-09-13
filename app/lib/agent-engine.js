@@ -448,6 +448,7 @@ export function createAgent() {
       // panel: mark the run as finished (checklist stays visible, spinner stops)
       if (Array.isArray(task.todos) && task.todos.length) store.setLiveTodos(task.todos, task.title, false);
       store.updateTask(task.id, { status, summary: summary ?? null, finishedAt: new Date().toISOString() });
+      try { store.pushTaskHistory({ id: task.id, title: task.title, status, summary: summary ?? null, startedAt: task.startedAt, finishedAt: new Date().toISOString(), files: task.files || [], commands: task.commands || [], todos: task.todos || [] }); } catch {}
       store.pushActivity({ actor: "agent", action: "task " + status, resource: task.title, result: status, risk: "low" });
       if (status === "completed") cfg.onStatus?.("✅ কাজ শেষ!");
       else if (status === "failed") cfg.onStatus?.("❌ কাজ ব্যর্থ হয়েছে");

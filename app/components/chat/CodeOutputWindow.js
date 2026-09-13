@@ -9,8 +9,9 @@
 import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { motion, AnimatePresence } from "motion/react";
-import { X, Minus, FileCode, Sparkles, ScrollText, ShieldCheck, ShieldAlert, Loader2 } from "lucide-react";
+import { X, Minus, FileCode, Sparkles, ScrollText, ShieldCheck, ShieldAlert, Loader2, Copy, Download, Save, Check } from "lucide-react";
 import { useCodeWindow } from "@/lib/code-window-store";
+import { useStore } from "@/lib/store";
 import { langOf, pc } from "@/lib/pc";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react").then((m) => m.default), {
@@ -97,6 +98,27 @@ export default function CodeOutputWindow() {
   const dragRef = useRef(null);
   const logEndRef = useRef(null);
   const active = files.find((f) => f.path === activePath) || files[0];
+  // §12 code-output actions: copy / download / save-to-project (also line-numbers +
+  // language detection via Monaco, filename shown in the toolbar).
+  const [copied, setCopied] = useState(false);
+  const doCopy = async () => {
+    if (!active) return;
+    try { await navigator.clipboard.writeText(String(active.content || "")); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
+  };
+  const doDownload = () => {
+    if (!active) return;
+    const blob = new Blob([String(active.content || "")], { type: "text/plain" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = active.path.split(/[\\/]/).pop() || "file.txt";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  };
+  const doSave = async () => {
+    if (!active) return;
+    const r = await pc("/file/write", { path: active.path, content: String(active.content || "") });
+    useStore.getState().pushToast(r?.ok ? { type: "success", message: "প্রজেক্টে সেভ হয়েছে: " + (active.path.split(/[\\/]/).pop()) } : { type: "error", message: "সেভ ব্যর্থ: " + (r?.error || "") });
+  };
 
   // ---- pending approvals polling (ask mode) -------------------------------
   const fetchPending = async () => {
@@ -263,6 +285,14 @@ export default function CodeOutputWindow() {
                       {f.streaming && <span className="ml-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" title="লিখছে…" />}
                     </button>
                   ))}
+                </div>
+                <div className="flex shrink-0 items-center gap-2 border-b bg-black/20 px-2 py-1" style={{ borderColor: "var(--border)" }}>
+                  <span className="truncate text-[10.5px] font-mono text-[var(--txt-dim)]" title={active?.path}>{active?.path?.split(/[\\/]/).pop() || ""} · {langOf(active?.path || "")} · {(String(active?.content || "").split("\n").length)} lines</span>
+                  <div className="ml-auto flex shrink-0 items-center gap-1">
+                    <button onClick={doCopy} title="Copy" className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] hover:bg-white/10">{copied ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}{copied ? "Copied" : "Copy"}</button>
+                    <button onClick={doDownload} title="Download" className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] hover:bg-white/10"><Download size={11} />Download</button>
+                    <button onClick={doSave} title="Save to project" className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] hover:bg-white/10" style={{ color: "var(--accent)" }}><Save size={11} />Save</button>
+                  </div>
                 </div>
                 <div className="min-h-0 flex-1">
                   {active && (isPptx(active.path) || isImage(active.path) || isAudio(active.path) || isVideo(active.path)) ? (

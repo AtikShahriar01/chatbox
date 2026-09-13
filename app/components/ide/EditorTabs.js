@@ -6,9 +6,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { motion, AnimatePresence } from "motion/react";
-import { X, Circle, Save, GitCompare, Undo2, FileCode } from "lucide-react";
+import { X, Circle, Save, GitCompare, Undo2, FileCode, MessageSquareText, Wand2, Wrench } from "lucide-react";
 import { pc, langOf } from "@/lib/pc";
 import { useIde } from "@/lib/ide-store";
+import { useStore } from "@/lib/store";
+import { useUi } from "@/lib/ui-store";
 
 // Monaco loads from /monaco-vscode (local copy in /public — no CDN, works
 // offline, and keeps the CSP 'self'-only script rule honest). Without this
@@ -50,6 +52,25 @@ export default function EditorTabs({ workspace, aiTargetRef }) {
   const pushActivity = useIde((s) => s.pushActivity);
   const [showDiff, setShowDiff] = useState({});
   const active = tabs.find((t) => t.path === activePath);
+  const editorRef = useRef(null);
+  // §11 selection AI: send the selected code (or whole file) to the chat with a
+  // guided prompt — Explain / Refactor / Fix — via the existing chat-draft bridge.
+  const aiSelection = (kind) => {
+    const ed = editorRef.current;
+    let text = "";
+    try {
+      const model = ed?.getModel?.();
+      const sel = ed?.getSelection?.();
+      text = model && sel ? model.getValueInRange(sel) : (model?.getValue?.() || "");
+    } catch { text = ""; }
+    const file = active?.path?.split(/[\\/]/).pop() || "";
+    const snippet = text.trim().slice(0, 6000) || "(nothing selected — whole file)";
+    const lead = kind === "explain" ? "Explain this code from " + file + " in simple words (what it does, any bugs):\n"
+      : kind === "refactor" ? "Refactor this code in " + file + " for clarity/safety without changing behavior; show the full updated file in a code block:\n"
+      : "Find and fix the problems in this code from " + file + "; give the corrected full file:\n";
+    useStore.getState().setChatInputDraft(lead + "```\n" + snippet + "\n```");
+    useUi.getState().setView("chat");
+  };
 
   const saveTab = useCallback(async (tab) => {
     if (!tab) return;
@@ -130,6 +151,10 @@ export default function EditorTabs({ workspace, aiTargetRef }) {
               </button>
             </>
           )}
+          <div className="mx-1 h-4 w-px bg-white/10" />
+          <button className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[var(--txt-dim)] hover:bg-white/10" title="Explain selection in chat" onClick={() => aiSelection("explain")}><MessageSquareText size={12} /></button>
+          <button className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[var(--txt-dim)] hover:bg-white/10" title="Refactor selection (AI)" onClick={() => aiSelection("refactor")}><Wand2 size={12} /></button>
+          <button className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[var(--txt-dim)] hover:bg-white/10" title="Fix problems in selection (AI)" onClick={() => aiSelection("fix")}><Wrench size={12} /></button>
           <button
             className={`flex items-center gap-1 rounded px-1.5 py-0.5 ${active.dirty ? "bg-[var(--accent)]/20 text-[var(--accent)] hover:bg-[var(--accent)]/30" : "opacity-50"}`}
             onClick={() => saveTab(active)} disabled={!active.dirty}
@@ -162,6 +187,7 @@ export default function EditorTabs({ workspace, aiTargetRef }) {
             theme="vs-dark"
             beforeMount={beforeMount}
             onMount={(editor) => {
+              editorRef.current = editor;
               // If the editor mounts while its container is mid-layout (view
               // switch / panel animation) it measures ~0×0 and renders blank.
               // Force a re-layout now and once more after the next frame.

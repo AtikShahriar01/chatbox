@@ -25,6 +25,9 @@ const crypto = require("crypto");
 const zlib = require("zlib");
 const media = require("./media.js");
 media.init({ confine, audit, runCommand });
+// symlink-aware containment logic extracted into a pure module so the §20
+// test suite can exercise the exact production pathguard from Node directly
+const { checkContained, normalizeHostIp } = require("./pathguard");
 
 const PORT = 8765;
 const APP_ORIGIN = "http://localhost:3000";
@@ -73,14 +76,8 @@ function writeWorkspace(p) {
 function effectiveWorkspace() { return readWorkspace() || DEFAULT_WS; }
 
 function confine(p) {
-  const ws = effectiveWorkspace();
-  const rel = path.relative(ws, p);
-  if (rel.startsWith("..") || path.isAbsolute(rel)) {
-    return { ok: false, error: `Outside workspace (${ws}). Set a different workspace or clear it.` };
-  }
-  const g = guardedReason(p);
-  if (g) return { ok: false, error: g };
-  return { ok: true, path: p };
+  // lexical + real-path (symlink/junction) containment — see pathguard.js
+  return checkContained(effectiveWorkspace(), p, guardedReason);
 }
 
 // Guarded zone: the bridge's own home (token, audit log, checkpoints) must
@@ -123,7 +120,10 @@ function resolvePath(p) {
   if (!p) return null;
   if (p === "~") return os.homedir();
   if (p.startsWith("~/") || p.startsWith("~\\")) return path.join(os.homedir(), p.slice(2));
-  return path.resolve(p);
+  // Relative paths are workspace-relative (NOT bridge-process-cwd relative):
+  // the app/agent always speaks in project-relative terms, and the bridge's
+  // cwd must never influence where files land.
+  return path.resolve(effectiveWorkspace(), p);
 }
 
 // Redact accidental secrets in COMMAND OUTPUT (never in file reads — the
@@ -1217,13 +1217,19 @@ const server = http.createServer(async (req, res) => {
         if (!url || !/^https?:\/\//i.test(url)) return { ok: false, error: "missing/invalid url" };
         // SSRF guard (directive §11): never download from loopback / private /
         // link-local / metadata targets — the bridge runs on a machine that HAS
-        // services on localhost worth protecting.
-        let host;
-        try { host = new URL(url).hostname.toLowerCase(); } catch { return { ok: false, error: "invalid url" }; }
-        const SSRF_BLOCK = /^(localhost|.*\.localhost|127\.|10\.|192\.168\.|169\.254\.|0\.0\.0\.0|\[::1\]|\[fc|\[fd|metadata\.google\.internal$)/i;
-        const m172 = host.match(/^172\.(\d+)\./);
-        const isPrivate = SSRF_BLOCK.test(host) || (m172 && Number(m172[1]) >= 16 && Number(m172[1]) <= 31);
-        if (isPrivate) { audit("BLOCK", "download " + url.slice(0, 100), "SSRF private target"); return { ok: false, error: "blocked: private/loopback target" }; }
+        // services on localhost worth protecting. Hostnames are normalized
+        // first ([::ffff:7f00:1] = 127.0.0.1), and redirects are followed
+        // MANUALLY so every hop passes the same check (a public URL that
+        // 302s to 169.254.169.254 is the classic bypass).
+        const SSRF_BLOCK = /^(localhost|.*\.localhost|127\.|10\.|192\.168\.|169\.254\.|0\.0\.0\.0|::1|fe80:|f[cd][0-9a-f]{2}:|metadata\.google\.internal$)/i;
+        const ssrfBadHost = (hostname) => {
+          const host = normalizeHostIp(hostname);
+          const m172 = host.match(/^172\.(\d+)\./);
+          return SSRF_BLOCK.test(host) || !!(m172 && Number(m172[1]) >= 16 && Number(m172[1]) <= 31);
+        };
+        let target;
+        try { target = new URL(url); } catch { return { ok: false, error: "invalid url" }; }
+        if (ssrfBadHost(target.hostname)) { audit("BLOCK", "download " + url.slice(0, 100), "SSRF private target"); return { ok: false, error: "blocked: private/loopback target" }; }
         if (!p) return { ok: false, error: "missing path" };
         const c = confine(p);
         if (!c.ok) return c;
@@ -1231,7 +1237,21 @@ const server = http.createServer(async (req, res) => {
         try {
           fs.mkdirSync(path.dirname(c.path), { recursive: true });
           const maxBytes = Number(body.maxBytes) || 200 * 1024 * 1024;
-          const res = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(Number(body.timeoutMs) || 300000) });
+          let res;
+          for (let hop = 0; ; hop++) {
+            res = await fetch(target.href, { redirect: "manual", signal: AbortSignal.timeout(Number(body.timeoutMs) || 300000) });
+            if ([301, 302, 303, 307, 308].includes(res.status)) {
+              const loc = res.headers.get("location");
+              if (!loc || hop >= 5) return { ok: false, error: "too many / invalid redirects" };
+              let next;
+              try { next = new URL(loc, target); } catch { return { ok: false, error: "bad redirect url" }; }
+              if (next.protocol !== "http:" && next.protocol !== "https:") return { ok: false, error: "blocked: redirect to non-http scheme" };
+              if (ssrfBadHost(next.hostname)) { audit("BLOCK", "download redirect → " + next.href.slice(0, 100), "SSRF private redirect"); return { ok: false, error: "blocked: private/loopback redirect target" }; }
+              target = next;
+              continue;
+            }
+            break;
+          }
           if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
           const buf = Buffer.from(await res.arrayBuffer());
           if (buf.length > maxBytes) return { ok: false, error: `too big (${buf.length}B > limit ${maxBytes}B)` };

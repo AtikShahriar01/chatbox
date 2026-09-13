@@ -11,7 +11,7 @@ import {
   buildOllamaRequest,
   buildCohereRequest,
 } from "../../../lib/providers";
-import { guard } from "../../../lib/guard";
+import { guard, providerUrlGuard } from "../../../lib/guard";
 import { requireSession } from "../../../lib/session";
 
 export const runtime = "nodejs";
@@ -69,6 +69,12 @@ export async function POST(req) {
   // untrusted — reject before any processing; fail closed) ----
   if (typeof apiBaseUrl !== "string" || apiBaseUrl.length > 500 || !/^https?:\/\//i.test(apiBaseUrl)) {
     return new Response("Invalid apiBaseUrl", { status: 400 });
+  }
+  // SSRF (directive §11): the proxy target must never be a cloud metadata
+  // endpoint — local/LAN inference servers stay allowed.
+  {
+    const urlBad = providerUrlGuard(apiBaseUrl);
+    if (urlBad) return new Response(`apiBaseUrl rejected: ${urlBad}`, { status: 400 });
   }
   if (typeof model !== "string" || !model.trim() || model.length > 200) {
     return new Response("Invalid model", { status: 400 });

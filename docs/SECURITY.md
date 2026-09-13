@@ -83,7 +83,10 @@ bridge (127.0.0.1)   ← Bearer token + confine + denylist + audit
 
 - সম্পূর্ণ সিকিউরিটি ডিরেক্টিভ: [docs/SECURITY-DIRECTIVE.md](SECURITY-DIRECTIVE.md)
 - সর্বশেষ অডিট রিপোর্ট (findings, severity, remaining risks): [docs/SECURITY_AUDIT.md](SECURITY_AUDIT.md)
-- লাইভ টেস্ট স্যুট: `.selftest/security-live-tests.mjs` (২৫ টেস্ট)
+- §20 টেস্ট পিরামিড (১৭২ চেক): `node .selftest/run-all.mjs` — unit(52) · parser(12) ·
+  integration(32) · security-live(25) · security-deep(35) · e2e(16); ম্যাপ: [TESTING.md](TESTING.md)
+- SSRF/পাথ-কনফাইনমেন্ট ইউনিট: `app/lib/guard.js` (providerUrlGuard, normalizeHostIp) +
+  `agent-bridge/pathguard.js` (real-path confinement)
 
 ## LAN Mode — অন্য ডিভাইস থেকে ব্যবহার (start-server.bat)
 
