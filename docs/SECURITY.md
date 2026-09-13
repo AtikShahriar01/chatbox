@@ -13,6 +13,8 @@
 | XSS (মেসেজের ভেতরে স্ক্রিপ্ট) | API key চুরি / কোড এক্সিকিউশন | CSP + markdown sanitize |
 | DoS / resource abuse | বিশাল body, ঝড়ো রিকোয়েস্ট | size cap + rate limit |
 | Command injection | commit message / মডেল আউটপুটে শেল কমান্ড | args-array git + denylist |
+| SSRF via provider URL | `apiBaseUrl`-তে ক্লাউড metadata IP ঠুকিয়ে সার্ভারকে ভেতর থেকে পড়ানো | providerUrlGuard + normalizeHostIp |
+| Symlink/junction escape | workspace-র ভেতরে লিংক বসিয়ে বাইরে ফাইল পড়া/লেখা | pathguard real-path containment |
 | বিপজ্জনক bridge op | কেউ নতুন/অজানা route চালানো | op whitelist |
 | ভুলে workspace মোছা | খালি POST দিয়ে রিসেট | explicit `clear:true` লাগে |
 | Credential চোরাই | .env, SSH key, ব্রাউজার কুকি | bridge denylist + redaction |
@@ -36,7 +38,7 @@
 
 6. **Custom client header** (`x-chatbox-client: chatbox-web-1`) — `/api/pc/*`-তে বাধ্যতামূলক।
    Cross-site form/no-cors fetch কাস্টম হেডার দিতে পারে না → drive-by bridge access অসম্ভব।
-7. **Bridge op whitelist** (`lib/guard.js: ALLOWED_PC_OPS`) — শুধু জানা ৪৫টা route
+7. **Bridge op whitelist** (`lib/guard.js: ALLOWED_PC_OPS`) — শুধু জানা ৫১টা route
    ফরোয়ার্ড হয়; অজানা op মানে 400।
 8. **Rate limiting** (sliding window): chat 30/min, web-search 12/min, models 20/min,
    test-connection 15/min, pc 240/min — 429 + Retry-After।
@@ -48,14 +50,27 @@
 12. **Token security** — bridge token শুধু 127.0.0.1, Authorization: Bearer, token
     কখনো ব্রাউজারে যায় না (stream/raw প্রক্সি সার্ভার-সাইডে যোগ করে)।
 13. **Path confinement** — সব ফাইল op workspace-এর ভেতরে confine; agent-bridge ফোল্ডার
-    নিজেই (token/audit/checkpoints) guarded zone।
+    নিজেই (token/audit/checkpoints) guarded zone। **Symlink-safe:** workspace-এর ভেতরে
+    junction/symlink রেখেও বাইরে যাওয়া যায় না — real-path containment
+    (`agent-bridge/pathguard.js`), এবং relative path সবসময় workspace-নির্াপেক্ষ।
 14. **Exec denylist** — `.ssh`, `.env`, ব্রাউজার Cookies/Login Data, LSASS, SAM,
     secrets/credentials ফাইল স্পর্শ করলে কমান্ড BLOCK + audit।
 15. **Secret redaction** — কমান্ড আউটপুটে API key/`Bearer` token স্বয়ংক্রিয়ভাবে
     `***REDACTED***` হয় (chat route + bridge দুই জায়গায়)।
 16. **Audit log** — প্রতিটা bridge action (`agent-bridge/audit.log`) — কে কী করেছে সব লেখা থাকে।
-17. **API key স্কোপ** — BYOK: key শুধু আপনার ব্রাউজারের localStorage-এ; সার্ভারে কোথাও
-    সেভ হয় না; প্রতি রিকোয়েস্টে শুধু প্রোভাইডারে যায়।
+17. **API key স্কোপ** — BYOK: key শুধু আপনার ব্রাউজারে (চাইলে Settings-এর
+    "session-only" টগলে localStorage-এও থাকে না); সার্ভারে কোথাও সেভ হয় না;
+    প্রতি রিকোয়েস্টে শুধু প্রোভাইডারে যায়।
+18. **Server-side session auth (§4/§16)** — PIN server-এ **scrypt** দিয়ে hash
+    (পুরনো লেগ্যাসি hash auto-upgrade হয়); ব্রাউজারে শুধু HMAC-cookie
+    `exp.version.sig` (HttpOnly, SameSite=Strict); `tokenVersion` bump =
+    Logout-all/Change-PIN-এ সব পুরনো session instant revoke; ৫ ভুল PIN → ৫ মিনিট
+    lockout; session ছাড়া পেজ → /login (middleware), API → 401 (fail-closed)।
+19. **SSRF guards (§11, §20-তে harden)** — provider `apiBaseUrl` ও bridge
+    `/file/download`: AWS/GCP/Alibaba metadata, link-local (169.254.x), IPv6
+    link-local ও **IPv4-mapped-IPv6** (`[::ffff:a9fe:a9fe]`) সব block —
+    `normalizeHostIp` + `providerUrlGuard` দিয়ে; download redirect গুলো hop-by-hop
+    পুনর্বৈধ (302→metadata bypass অসম্ভব); localhost/LAN Ollama-BYOK অবশ্য allowed।
 
 ## ডিফেন্স-ইন-ডেপথ — একই জিনিস ৩ স্তরে
 
