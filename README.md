@@ -92,6 +92,10 @@ A visual tour of the premium dark-themed interfaces built into Chatbox:
 
 ---
 
+<p align="center">
+  <img src="assets/divider.svg" alt="animated divider" width="100%">
+</p>
+
 ## 🚀 Core & Advanced Features
 
 ### 💬 Chat & Models
@@ -146,6 +150,18 @@ A visual tour of the premium dark-themed interfaces built into Chatbox:
 | **Security** | Host/Origin gates, HMAC session cookies (scrypt PIN + token rotation), CSP, rate limits, op whitelist, exec denylist, provider-URL SSRF guard, symlink-safe path confinement, audit log |
 | **Testing** | §20 pyramid: unit · parser · integration · security-live · security-deep · e2e — **172 checks** via `node .selftest/run-all.mjs` |
 
+### 🏗️ System Architecture
+
+```mermaid
+flowchart LR
+    Browser["User Browser\n(localhost:3000)"] --> App["Next.js App\nchat + IDE + console"]
+    App --> Bridge["PC Bridge\n127.0.0.1:8765"]
+    App --> Cloud["Cloud Providers\nOpenAI · Claude · Gemini"]
+    App --> Local["Local Models\nOllama · LM Studio"]
+    Bridge --> Files["Workspace Files\nconfined + audited"]
+    Bridge --> Shell["Terminal · Git\ncheckpoints"]
+```
+
 ---
 
 ## 📊 Feature Comparison Matrix
@@ -198,6 +214,10 @@ Double-click one launcher:
 
 ---
 
+<p align="center">
+  <img src="assets/divider.svg" alt="animated divider" width="100%">
+</p>
+
 ## 🛡️ Security & Permission Model
 
 Chatbox uses **defense-in-depth** — five independent layers plus a layered regression-test pyramid (full write-ups: [docs/SECURITY.md](docs/SECURITY.md), [docs/SECURITY_AUDIT.md](docs/SECURITY_AUDIT.md), [docs/TESTING.md](docs/TESTING.md)):
@@ -211,6 +231,16 @@ Chatbox uses **defense-in-depth** — five independent layers plus a layered reg
 🧪 **§20 Test pyramid** — every layer above is pinned by `node .selftest/run-all.mjs`: 172 checks across unit, SSE-parser, integration, two security batteries (forged-cookie auth bypass, SSRF, path traversal, symlink escape, command injection, CSRF incl. raw-socket Host rebinding, XSS headers, rate-limit bypass) and E2E journeys with a full live agent workflow. CI runs the offline half on every push.
 
 **Agent permission modes:** 🔒 *Ask* (every action needs approval) · 🛡️ *Safe* (reads auto) · ⚡ *Full Access* (automatic, use with care).
+
+### 🧅 Defense-in-Depth Layers
+
+```mermaid
+flowchart TD
+    L1["1 · Network\nlocalhost bind + Host allowlist"] --> L2["2 · Auth\nscrypt PIN + HMAC session"]
+    L2 --> L3["3 · API\norigin + rate-limit + op whitelist"]
+    L3 --> L4["4 · Bridge\ntoken + path confine + audit log"]
+    L4 --> L5["5 · Content\nCSP + markdown sanitize"]
+```
 
 ---
 
