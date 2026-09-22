@@ -63,6 +63,11 @@ Unlike public chat apps, Chatbox also ships a **real code editor, a live termina
 
 A visual tour of the premium dark-themed interfaces built into Chatbox:
 
+<p align="center">
+  <img src="assets/demo.gif" alt="Chatbox live tour: chat, IDE and console" width="100%"><br>
+  <em>🎬 Live tour — real app: chat → IDE → console.</em>
+</p>
+
 <table width="100%">
   <tr>
     <td width="50%" align="center">
