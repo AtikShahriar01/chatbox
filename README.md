@@ -22,6 +22,10 @@
 </p>
 
 <p align="center">
+  <img src="assets/banner-3d.svg" alt="Chatbox 3D animated banner" width="100%">
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/badge/Privacy-Local--first-success?style=flat-square" alt="Privacy">
   <img src="https://img.shields.io/badge/Models-OpenAI%20%7C%20Claude%20%7C%20Gemini%20%7C%20Ollama-blue?style=flat-square" alt="Models">
   <img src="https://img.shields.io/badge/Security-5--Layer-important?style=flat-square" alt="Security">

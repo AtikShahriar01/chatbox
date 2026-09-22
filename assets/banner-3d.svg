@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="340" viewBox="0 0 1200 340" role="img" aria-label="Chatbox animated 3D banner">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b0e1a"/>
+      <stop offset="0.55" stop-color="#141b3d"/>
+      <stop offset="1" stop-color="#2a1656"/>
+    </linearGradient>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2f6feb"/>
+      <stop offset="1" stop-color="#9333ea"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.14"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.04"/>
+    </linearGradient>
+    <linearGradient id="sweep" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.10"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#7c5cff" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#7c5cff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="10"/>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="340" rx="24" fill="url(#bg)"/>
+
+  <!-- perspective grid floor -->
+  <g stroke="#3b3b8f" stroke-opacity="0.35" stroke-width="1">
+    <line x1="0" y1="252" x2="1200" y2="252"/>
+    <line x1="0" y1="276" x2="1200" y2="276"/>
+    <line x1="0" y1="306" x2="1200" y2="306"/>
+    <line x1="120" y1="252" x2="20" y2="340"/>
+    <line x1="360" y1="252" x2="300" y2="340"/>
+    <line x1="600" y1="252" x2="600" y2="340"/>
+    <line x1="840" y1="252" x2="900" y2="340"/>
+    <line x1="1080" y1="252" x2="1180" y2="340"/>
+  </g>
+  <ellipse cx="600" cy="300" rx="330" ry="26" fill="url(#glow)">
+    <animate attributeName="opacity" values="0.7;1;0.7" dur="5s" repeatCount="indefinite"/>
+  </ellipse>
+
+  <!-- floating card: chat (left) -->
+  <g>
+    <animateTransform attributeName="transform" type="translate" values="0 0; 0 -12; 0 0" dur="4.5s" repeatCount="indefinite"/>
+    <rect x="90" y="86" width="220" height="130" rx="18" fill="url(#card)" stroke="#ffffff" stroke-opacity="0.22"/>
+    <rect x="112" y="106" width="120" height="14" rx="7" fill="#2f6feb" fill-opacity="0.8"/>
+    <rect x="112" y="130" width="176" height="10" rx="5" fill="#ffffff" fill-opacity="0.28"/>
+    <rect x="112" y="148" width="140" height="10" rx="5" fill="#ffffff" fill-opacity="0.18"/>
+    <circle cx="126" cy="190" r="7" fill="#22c55e"/>
+    <rect x="142" y="185" width="90" height="10" rx="5" fill="#ffffff" fill-opacity="0.22"/>
+  </g>
+
+  <!-- floating card: code (right) -->
+  <g>
+    <animateTransform attributeName="transform" type="translate" values="0 0; 0 -14; 0 0" dur="5.2s" begin="0.8s" repeatCount="indefinite"/>
+    <rect x="890" y="86" width="220" height="130" rx="18" fill="url(#card)" stroke="#ffffff" stroke-opacity="0.22"/>
+    <text x="912" y="128" font-family="monospace" font-size="20" fill="#7ee2a8">&gt;_</text>
+    <rect x="912" y="142" width="150" height="10" rx="5" fill="#7ee2a8" fill-opacity="0.45"/>
+    <rect x="912" y="160" width="110" height="10" rx="5" fill="#7ee2a8" fill-opacity="0.28"/>
+    <rect x="912" y="178" width="130" height="10" rx="5" fill="#7ee2a8" fill-opacity="0.18"/>
+  </g>
+
+  <!-- floating badge: shield (top-right of logo) -->
+  <g>
+    <animateTransform attributeName="transform" type="translate" values="0 0; 0 -8; 0 0" dur="3.6s" begin="0.4s" repeatCount="indefinite"/>
+    <circle cx="742" cy="120" r="26" fill="url(#card)" stroke="#22c55e" stroke-opacity="0.6" stroke-width="2"/>
+    <path d="M742 106 l10 4 v7 c0 7 -4.5 11.5 -10 13.5 c-5.5 -2 -10 -6.5 -10 -13.5 v-7 z" fill="none" stroke="#22c55e" stroke-width="2.5"/>
+    <path d="M737 117 l4 4 l7 -8" fill="none" stroke="#22c55e" stroke-width="2.5"/>
+  </g>
+
+  <!-- floating badge: model chip (top-left of logo) -->
+  <g>
+    <animateTransform attributeName="transform" type="translate" values="0 0; 0 -9; 0 0" dur="4s" begin="1.2s" repeatCount="indefinite"/>
+    <rect x="400" y="96" width="96" height="44" rx="22" fill="url(#card)" stroke="#9333ea" stroke-opacity="0.6" stroke-width="2"/>
+    <circle cx="424" cy="118" r="8" fill="url(#brand)"/>
+    <rect x="438" y="112" width="44" height="12" rx="6" fill="#ffffff" fill-opacity="0.5"/>
+  </g>
+
+  <!-- center logo bubble with pulse rings -->
+  <circle cx="600" cy="150" r="66" fill="none" stroke="#7c5cff" stroke-opacity="0.5" stroke-width="2">
+    <animate attributeName="r" values="56;78;56" dur="3.2s" repeatCount="indefinite"/>
+    <animate attributeName="stroke-opacity" values="0.6;0.1;0.6" dur="3.2s" repeatCount="indefinite"/>
+  </circle>
+  <rect x="548" y="98" width="104" height="104" rx="26" fill="url(#brand)"/>
+  <path d="M566 130 h68 a10 10 0 0 1 10 10 v22 a10 10 0 0 1 -10 10 h-40 l-17 14 v-14 a10 10 0 0 1 -11 -10 v-22 a10 10 0 0 1 10 -10 z" fill="#ffffff"/>
+  <circle cx="590" cy="152" r="4" fill="#2f6feb">
+    <animate attributeName="opacity" values="1;0.25;1" dur="1.2s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="604" cy="152" r="4" fill="#2f6feb">
+    <animate attributeName="opacity" values="1;0.25;1" dur="1.2s" begin="0.2s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="618" cy="152" r="4" fill="#2f6feb">
+    <animate attributeName="opacity" values="1;0.25;1" dur="1.2s" begin="0.4s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- title + subtitle -->
+  <text x="600" y="238" text-anchor="middle" font-family="Verdana, Arial, sans-serif" font-size="44" font-weight="bold" fill="#ffffff" letter-spacing="8">CHATBOX</text>
+  <text x="600" y="266" text-anchor="middle" font-family="Verdana, Arial, sans-serif" font-size="16" fill="#b9c2ff">local-first multi-model chat + IDE + PC agent</text>
+
+  <!-- shimmer sweep -->
+  <rect x="-300" y="0" width="300" height="340" fill="url(#sweep)" opacity="0.7">
+    <animate attributeName="x" values="-300;1200" dur="6s" repeatCount="indefinite"/>
+  </rect>
+</svg>
