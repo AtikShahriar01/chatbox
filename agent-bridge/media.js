@@ -30,9 +30,10 @@ function resolveFfprobe() { return fs.existsSync(LOCAL_FFPROBE) ? LOCAL_FFPROBE 
 // NOTE: never resolve python by bare name — the WindowsApps alias silently
 // fails in hidden/detached sessions. Prefer the REAL python.exe by absolute
 // path, and verify edge_tts is importable before trusting a candidate.
+// (কোনো hardcoded C:/Users/... পথ নয় — ফোল্ডার যেকোনো drive-এ move করলেও
+//  কাজ করবে; সব temp H:\chatbot create\.tmp-এর ভেতরে।)
 const PY_CANDIDATES = [
-  "C:/Users/Atik/AppData/Local/Python/pythoncore-3.14-64/python.exe",
-  path.join(DEFAULT_WS.replace(/\\/g, "/"), ".home/AppData/Local/Python/pythoncore-3.14-64/python.exe"),
+  path.join(DEFAULT_WS, ".home", "AppData", "Local", "Python", "pythoncore-3.14-64", "python.exe"),
   "python", "py", "python3",
 ];
 let _pyCmd = undefined; // undefined = not probed, null = probe failed
@@ -76,15 +77,19 @@ function edgeVoices() {
 function ttsOnce(py, voice, text, outPath) {
   // Run through the bridge's own runCommand — the exact mechanism /exec uses,
   // which is the only spawn shape empirically reliable from this process.
-  // Zero-quote command; no-space scratch dir; Node copies result afterwards.
-  const SCRATCH = "H:/cb-tts";
+  // Scratch সবসময় workspace-এর ভেতরে (.tmp/tts) — H:/ root বা C: drive-এ নয়।
+  const SCRATCH = path.join(DEFAULT_WS, ".tmp", "tts");
   try { fs.mkdirSync(SCRATCH, { recursive: true }); } catch {}
   const id = crypto.randomBytes(6).toString("hex");
   const textFile = SCRATCH + "/" + id + ".txt";
   const mediaTmp = SCRATCH + "/" + id + ".mp3";
   fs.writeFileSync(textFile, text.slice(0, 3000), "utf8");
-  const pyWin = String(py).split("/").join("/");
-  // WORKING COMBO (proven via /exec): write a .bat, then runCommand("H:/cb-tts/x.bat").
+  // voice allowlist — body.voice ইউজার-কন্ট্রোল্ড, bat-এ সরাসরি বসালে command
+  // injection হবে। শুধু EDGE_VOICES বা safe pattern অনুমোদিত।
+  const safeVoice = EDGE_VOICES.includes(voice)
+    ? voice
+    : /^[A-Za-z0-9-]{1,40}$/.test(voice) ? voice : "bn-BD-NabanitaNeural";
+  // WORKING COMBO (proven via /exec): write a .bat, then runCommand(".../x.bat").
   // The bat does its own parsing (backslash paths fine inside a bat file);
   // logs to its own file; done-marker tells Node the bat finished.
   const batFile = `${SCRATCH}/${id}.bat`;
@@ -96,12 +101,13 @@ function ttsOnce(py, voice, text, outPath) {
   const dfWin = doneFile.replace(/\//g, "\\");
   const bat =
     `@echo off\r\n` +
-    `cd /d H:\\\r\n` +
-    `"${pyBs}" -m edge_tts --voice ${voice} -f "${tfWin}" --write-media "${mfWin}" > "${lgWin}" 2>&1\r\n` +
+    `cd /d "${SCRATCH.replace(/\//g, "\\")}"\r\n` +
+    `"${pyBs}" -m edge_tts --voice ${safeVoice} -f "${tfWin}" --write-media "${mfWin}" > "${lgWin}" 2>&1\r\n` +
     `echo %ERRORLEVEL% > "${dfWin}"\r\n`;
   fs.writeFileSync(batFile, bat, "utf8");
   // Call the bridge's OWN /exec HTTP route — the exact path that has worked
   // 100% of the time today, vs every direct spawn shape from this process.
+  // workspace পথে space থাকতে পারে ("chatbot create") — তাই quote আবশ্যক।
   const callExec = (attempt) => new Promise((resolveHttp) => {
     fetch("http://127.0.0.1:8765/exec", {
       method: "POST",
@@ -109,13 +115,13 @@ function ttsOnce(py, voice, text, outPath) {
         "Content-Type": "application/json",
         Authorization: "Bearer " + fs.readFileSync(path.join(ROOT, "bridge-token.txt"), "utf8").trim(),
       },
-      body: JSON.stringify({ command: batFile }),
+      body: JSON.stringify({ command: `"${batFile.replace(/\//g, "\\")}"` }),
       signal: AbortSignal.timeout(170000),
     }).then((res) => res.json()).then(resolveHttp).catch((e) => resolveHttp({ ok: false, stderr: String(e.message) }));
   });
   return callExec().then(async (r) => {
     const fail = (msg) => {
-      try { fs.writeFileSync(path.join(os.tmpdir(), "edge-tts-last-error.txt"), "BAT=" + batFile + "\n" + msg, "utf8"); } catch {}
+      try { fs.writeFileSync(path.join(DEFAULT_WS, ".tmp", "edge-tts-last-error.txt"), "BAT=" + batFile + "\n" + msg, "utf8"); } catch {}
       try { fs.unlinkSync(textFile); } catch {}
       try { fs.unlinkSync(batFile); } catch {}
       try { fs.unlinkSync(mediaTmp); } catch {}

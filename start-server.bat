@@ -24,6 +24,7 @@ set "LOCALAPPDATA=%ROOT%\.home\AppData\Local"
 set "NODE_COMPILE_CACHE=%ROOT%\.tmp\node-compile-cache"
 set "npm_config_cache=%ROOT%\.npm\cache"
 set "npm_config_prefix=%ROOT%\.npm-global"
+set "GIT_CONFIG_GLOBAL=%ROOT%\.gitconfig"
 
 rem -- Portable Node --
 set "PATH=%~dp0tools\nodejs;%PATH%"

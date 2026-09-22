@@ -45,16 +45,19 @@ function isInside(parent, child) {
  */
 function checkContained(workspace, p, isGuarded) {
   const ws = path.resolve(workspace);
-  const rel = path.relative(ws, p);
+  // workspace-relative কলার (যেমন "a.txt")-এর জন্য আগে ws-এর সাপেক্ষে resolve
+  // করতে হবে — নইলে path.relative cwd-এর সাপেক্ষে ভুল হিসাব করে (fail-open)।
+  const abs0 = path.resolve(ws, p);
+  const rel = path.relative(ws, abs0);
   if (rel.startsWith("..") || path.isAbsolute(rel)) {
     return { ok: false, error: `Outside workspace (${ws}). Set a different workspace or clear it.` };
   }
   if (isGuarded) {
-    const g = isGuarded(p);
+    const g = isGuarded(abs0);
     if (g) return { ok: false, error: g };
   }
   // symlink/junction escape check
-  const abs = path.resolve(ws, p);
+  const abs = abs0;
   const real = realPathBestEffort(abs);
   if (real) {
     if (!isInside(ws, real)) {
@@ -65,7 +68,7 @@ function checkContained(workspace, p, isGuarded) {
       if (g2) return { ok: false, error: g2 };
     }
   }
-  return { ok: true, path: p };
+  return { ok: true, path: abs0 };
 }
 
 module.exports = { checkContained, realPathBestEffort, isInside, normalizeHostIp };

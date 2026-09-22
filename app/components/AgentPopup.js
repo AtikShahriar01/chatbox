@@ -135,7 +135,8 @@ function CodeBlock({ code, langHint, typing = false, danger = false, onEdit }) {
         ? hljs.highlight(code, { language: lang }).value
         : code.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
     } catch {
-      return code;
+      // fail-closed: highlight.js throw হলেও raw code কখনো innerHTML-এ যাবে না
+      return String(code).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
     }
   }, [code, lang]);
 

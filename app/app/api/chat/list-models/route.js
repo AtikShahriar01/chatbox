@@ -2,7 +2,7 @@
 // Returns { ok, models, error }.
 
 import { detectProvider, PROVIDER_LABELS } from "../../../../lib/providerMeta";
-import { guard } from "../../../../lib/guard";
+import { guard, providerUrlGuard } from "../../../../lib/guard";
 import { requireSession } from "../../../../lib/session";
 
 export const runtime = "nodejs";
@@ -15,7 +15,17 @@ export async function POST(req) {
   let body;
   try { body = await req.json(); } catch { return Response.json({ ok: false, error: "Invalid JSON" }, { status: 400 }); }
   const { apiBaseUrl, apiKey } = body || {};
-  if (!apiBaseUrl) return Response.json({ ok: false, error: "Missing apiBaseUrl" }, { status: 400 });
+  if (typeof apiBaseUrl !== "string" || !apiBaseUrl || apiBaseUrl.length > 500 || !/^https?:\/\//i.test(apiBaseUrl)) {
+    return Response.json({ ok: false, error: "Missing/invalid apiBaseUrl" }, { status: 400 });
+  }
+  if (apiKey !== undefined && (typeof apiKey !== "string" || apiKey.length > 1000)) {
+    return Response.json({ ok: false, error: "Invalid apiKey" }, { status: 400 });
+  }
+  // SSRF (§11): chat/test-connection-এর মতো এখানেও metadata/private টার্গেট ব্লক
+  {
+    const urlBad = providerUrlGuard(String(apiBaseUrl));
+    if (urlBad) return Response.json({ ok: false, error: `apiBaseUrl rejected: ${urlBad}` }, { status: 400 });
+  }
 
   const provider = detectProvider(apiBaseUrl);
   const headers = {};

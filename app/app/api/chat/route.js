@@ -59,6 +59,15 @@ export async function POST(req) {
   } catch {
     return new Response("Invalid JSON", { status: 400 });
   }
+  // chunked encoding-এ Content-Length না থাকলে guard-এর body-cap bypass হয় —
+  // তাই parse-এর পরেও আসল সাইজ মাপা হয় (fail-closed)।
+  try {
+    if (JSON.stringify(body || {}).length > 4 * 1024 * 1024) {
+      return new Response("body too large", { status: 413 });
+    }
+  } catch {
+    return new Response("Invalid JSON", { status: 400 });
+  }
 
   const {
     apiBaseUrl, apiKey, model, messages, temperature, stream, systemPrompt, max_tokens,
@@ -102,6 +111,14 @@ export async function POST(req) {
       if (m.content.length > 400_000) return new Response("Message too long", { status: 400 });
     } else if (Array.isArray(m.content)) {
       if (m.content.length > 20) return new Response("Too many content parts", { status: 400 });
+      // প্রতিটা part-এর সাইজও বাঁধা — 20টা বিশাল base64 image দিয়ে DoS আটকাতে
+      for (const part of m.content) {
+        try {
+          if (JSON.stringify(part || {}).length > 1_000_000) return new Response("Content part too large", { status: 400 });
+        } catch {
+          return new Response("Invalid message content", { status: 400 });
+        }
+      }
     } else {
       return new Response("Invalid message content", { status: 400 });
     }

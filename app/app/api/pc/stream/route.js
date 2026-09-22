@@ -3,6 +3,7 @@
 // Requires a valid session cookie (same-origin EventSource sends it).
 
 import { requireSession } from "../../../../lib/session";
+import { guard } from "../../../../lib/guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,6 +11,8 @@ export const dynamic = "force-dynamic";
 const BRIDGE = "http://127.0.0.1:8765";
 
 export async function GET(req) {
+  const blocked = guard(req, { rateKey: "pc-stream", rateMax: 120, maxBody: 4 * 1024 });
+  if (blocked) return blocked;
   const unauthed = requireSession(req);
   if (unauthed) return unauthed;
   const { searchParams } = new URL(req.url);

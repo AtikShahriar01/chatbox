@@ -82,10 +82,20 @@ function confine(p) {
 
 // Guarded zone: the bridge's own home (token, audit log, checkpoints) must
 // never be readable/writable/deletable through file tools (TRD §9).
+// PLUS: the app's session vault (.auth/session-secret + auth.json) lives
+// inside the default workspace — reading it would allow forging session
+// cookies, so it is guarded too even when the workspace is the project root.
 const CP_DIR = path.join(ROOT, "checkpoints");
+const AUTH_GUARD_DIR = path.resolve(ROOT, "..", ".auth");
 function guardedReason(p) {
   const rel = path.relative(ROOT, p);
   if (!rel.startsWith("..") && !path.isAbsolute(rel)) return "agent-bridge folder is protected (token/audit/checkpoints)";
+  try {
+    const relAuth = path.relative(AUTH_GUARD_DIR, p);
+    if (relAuth === "" || (!relAuth.startsWith("..") && !path.isAbsolute(relAuth))) {
+      return ".auth folder is protected (session secret)";
+    }
+  } catch {}
   return null;
 }
 
@@ -111,8 +121,22 @@ function send(res, status, obj) {
 function readBody(req) {
   return new Promise((resolve) => {
     let buf = "";
-    req.on("data", (c) => { buf += c; if (buf.length > 5e6) req.destroy(); });
-    req.on("end", () => { try { resolve(buf ? JSON.parse(buf) : {}); } catch { resolve({}); } });
+    let tooLarge = false;
+    req.on("data", (c) => {
+      if (tooLarge) return;
+      buf += c;
+      if (buf.length > 5e6) {
+        // fail-closed: 413 জানাতে হবে, promise ঝুলিয়ে রাখা যাবে না
+        tooLarge = true;
+        try { req.destroy(); } catch {}
+        resolve({ __tooLarge: true });
+      }
+    });
+    req.on("end", () => {
+      if (tooLarge) return;
+      try { resolve(buf ? JSON.parse(buf) : {}); } catch { resolve({ __badJson: true }); }
+    });
+    req.on("error", () => { if (!tooLarge) resolve({}); });
   });
 }
 
@@ -318,8 +342,14 @@ function termWrite(id, input) {
   const policy = commandPolicy(String(input));
   if (policy) { audit("BLOCK", String(input).slice(0, 120), policy); return { ok: false, error: policy }; }
   audit("TERM_IN", String(input).slice(0, 160));
-  t.shell.stdin.write(String(input).endsWith("\n") ? input : input + "\n");
-  return { ok: true };
+  try {
+    if (!t.shell.stdin || t.shell.stdin.destroyed) return { ok: false, error: "terminal closed" };
+    const ok = t.shell.stdin.write(String(input).endsWith("\n") ? input : input + "\n");
+    if (ok === false) { try { t.shell.stdin.once("drain", () => {}); } catch {} }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: "terminal write failed: " + String(e.message).slice(0, 120) };
+  }
 }
 function termKill(id) {
   const t = terms.get(id);
@@ -525,7 +555,10 @@ function makeAudio(body) {
   const voice = String(body.voice || "").trim();
   audit("AUDIO", `tts → ${c.path} (${text.length} chars)${voice ? " voice=" + voice : ""}`);
   return new Promise((resolve) => {
-    const safeText = text.replace(/\r/g, "");
+    // PowerShell @'...'@ here-string breakout fix: closing sequence হলো লাইনের
+    // শুরুতে "'@". টেক্সটের ভেতরে "'@" থাকলে "' @" করে দিই — উচ্চারণ একই,
+    // কিন্তু PowerShell ইনজেকশন আর সম্ভব না।
+    const safeText = text.replace(/\r/g, "").split("'@").join("' @");
     const ps = `Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer;` +
       (voice ? ` $v = $s.GetInstalledVoices() | Where-Object { $_.VoiceInfo.Name -like '*${voice.replace(/'/g, "''")}*' } | Select-Object -First 1; if ($v) { $s.SelectVoice($v.VoiceInfo.Name) };` : "") +
       ` $s.SetOutputToWaveFile('${String(c.path).replace(/'/g, "''")}'); $s.Speak(@'\n${safeText}\n'@); $s.Dispose();`;
@@ -890,7 +923,9 @@ const server = http.createServer(async (req, res) => {
   // ------------------------------------------------------- mode + approval
   if (route === "/mode" && req.method === "GET") return send(res, 200, { ok: true, mode: readMode() });
   if (route === "/mode" && req.method === "POST") {
-    const { mode } = await readBody(req);
+    const parsed = await readBody(req);
+    if (parsed && parsed.__tooLarge) return send(res, 413, { ok: false, error: "body too large" });
+    const { mode } = parsed || {};
     if (!["ask", "safe", "auto"].includes(mode)) return send(res, 400, { ok: false, error: "bad mode" });
     writeMode(mode);
     audit("MODE", mode);
@@ -902,6 +937,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (route === "/workspace" && req.method === "POST") {
     const parsed = await readBody(req);
+    if (parsed && parsed.__tooLarge) return send(res, 413, { ok: false, error: "body too large" });
     const wsPath = parsed.path;
     // Clearing the workspace is a real security boundary (it re-opens the whole
     // drive's default scope), so require an EXPLICIT clear flag. An empty POST
@@ -945,7 +981,9 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, { ok: true, pending: list });
   }
   if (route === "/approve" && req.method === "POST") {
-    const { id, allow, all } = await readBody(req);
+    const parsedAp = await readBody(req);
+    if (parsedAp && parsedAp.__tooLarge) return send(res, 413, { ok: false, error: "body too large" });
+    const { id, allow, all } = parsedAp || {};
     if (all) { // approve/deny every pending request at once
       const n = pending.size;
       for (const [pid, p] of [...pending.entries()]) { pending.delete(pid); p.resolve(allow !== false); audit(allow !== false ? "ALLOW" : "DENY", `${p.kind} ${p.summary} (all)`); }
@@ -959,7 +997,9 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, { ok: true });
   }
   if (route === "/deny" && req.method === "POST") {
-    const { id } = await readBody(req);
+    const parsedDn = await readBody(req);
+    if (parsedDn && parsedDn.__tooLarge) return send(res, 413, { ok: false, error: "body too large" });
+    const { id } = parsedDn || {};
     const p = pending.get(id);
     if (!p) return send(res, 404, { ok: false, error: "no such request" });
     pending.delete(id);
@@ -974,6 +1014,8 @@ const server = http.createServer(async (req, res) => {
   }
 
   const body = await readBody(req);
+  if (body && body.__tooLarge) return send(res, 413, { ok: false, error: "body too large" });
+  if (body && body.__badJson) return send(res, 400, { ok: false, error: "invalid JSON" });
 
   const doOp = async () => {
     switch (route) {
@@ -1056,30 +1098,38 @@ const server = http.createServer(async (req, res) => {
       case "/file/edit": {
         const p = resolvePath(body.path);
         if (!p || body.search == null || body.replace == null) return { ok: false, error: "missing path/search/replace" };
+        if (typeof body.search !== "string" || body.search.length === 0) return { ok: false, error: "search must be a non-empty string" };
+        if (body.search.length > 5000) return { ok: false, error: "search too long (max 5000 chars)" };
         const c = confine(p);
         if (!c.ok) return c;
         audit("EDIT", `${c.path} — replace ${JSON.stringify(String(body.search).slice(0, 60))}`);
         try {
-          const src = fs.readFileSync(p, "utf8");
+          const src = fs.readFileSync(c.path, "utf8");
           const count = src.split(body.search).length - 1;
           if (count === 0) return { ok: false, error: "search text not found in file" };
           const updated = body.all === false
             ? src.replace(body.search, body.replace)
             : src.split(body.search).join(body.replace);
-          fs.writeFileSync(p, updated, "utf8");
-          return { ok: true, path: p, replacements: count };
+          fs.writeFileSync(c.path, updated, "utf8");
+          return { ok: true, path: c.path, replacements: count };
         } catch (e) { return { ok: false, error: String(e.message) }; }
       }
       case "/grep": {
         const dir = resolvePath(body.path || effectiveWorkspace());
         const pattern = String(body.pattern || "");
         if (!pattern) return { ok: false, error: "missing pattern" };
+        if (pattern.length > 200) return { ok: false, error: "pattern too long (max 200 chars)" };
         const c = confine(dir);
         if (!c.ok) return c;
-        audit("GREP", `${pattern} in ${c.path}`);
+        let re;
+        try {
+          re = new RegExp(pattern, body.ignoreCase === false ? "" : "i");
+        } catch {
+          return { ok: false, error: "invalid regex pattern" };
+        }
+        audit("GREP", `${pattern.slice(0, 80)} in ${c.path}`);
         try {
           const hits = [];
-          const re = new RegExp(pattern, body.ignoreCase === false ? "" : "i");
           const walk = (d, depth) => {
             if (depth > 8 || hits.length >= 200) return;
             let entries; try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
@@ -1296,7 +1346,7 @@ const server = http.createServer(async (req, res) => {
     if (!allowed) return send(res, 403, { ok: false, error: "denied by user" });
   }
 
-  const result = await doOp();
+  const result = await doOp().catch((e) => ({ ok: false, error: String(e?.message || e).slice(0, 200) }));
   audit("RESULT", `${route} ${result.ok ? "ok" : "error: " + (result.error || "").slice(0, 100)}`);
   return send(res, 200, result);
 });
