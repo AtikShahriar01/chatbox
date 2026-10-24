@@ -50,6 +50,10 @@ fs.mkdirSync(demo, { recursive: true });
 fs.writeFileSync(demo + "\\app.js", 'console.log("hello from sec-demo");\n');
 execSync(`git init -q "${demo}"`);
 execSync(`git -C "${demo}" add .`);
+// NOTE: the L11 injection commit below is intentionally the FIRST commit of
+// this scratch repo. It needs a git identity — provided by GIT_CONFIG_GLOBAL
+// (env.bat) locally, and by the CI workflow's git config step. Without it,
+// `git log -1` crashes the suite ("branch has no commits yet").
 
 const AUTH_DIR = path.join(WS, ".auth");
 const authed = fs.existsSync(AUTH_DIR + "\\auth.json");

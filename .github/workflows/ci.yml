@@ -65,6 +65,11 @@ jobs:
         working-directory: app
         run: npx next build
 
+      - name: Configure git identity (the commit-injection security test makes a real commit)
+        run: |
+          git config --global user.name "sec-ci"
+          git config --global user.email "sec-ci@local"
+
       - name: Start agent-bridge (127.0.0.1:8765)
         working-directory: agent-bridge
         shell: bash
