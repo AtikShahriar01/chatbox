@@ -1,4 +1,5 @@
 // Agent definitions and LLM helpers for the CEO → worker orchestration.
+import { useStore } from "./store";
 // Every call goes through the app's own /api/chat proxy so BYOK auth,
 // provider detection, and key-scrubbing stay consistent.
 
@@ -352,11 +353,29 @@ function fallbackName(userText, role, i) {
   return `${core}${SUFFIX[role] || "Forge"}${i > 0 ? i + 1 : ""}`;
 }
 
+// User-defined agent skills (Settings → Skills): enabled skills are appended
+// to the CEO plan prompt and the autonomous agent's system prompt so custom
+// workflows/stack conventions shape every run.
+export function skillsBlock() {
+  try {
+    const skills = (useStore.getState().skills || []).filter((sk) => sk.enabled);
+    if (!skills.length) return "";
+    const lines = skills
+      .map((sk) => `- ${sk.name}${sk.description ? `: ${sk.description}` : ""}\n
+  ${String(sk.prompt || "").slice(0, 600).replace(/\s+/g, " ")}`)
+      .join("\n");
+    return `\n\nUSER-DEFINED SKILLS (apply when relevant):
+${lines}`.slice(0, 4000);
+  } catch {
+    return "";
+  }
+}
+
 export async function planSubtasks(cfg, userText, signal, onToken) {
   const content = await streamModel({
     ...cfg,
     messages: [
-      { role: "system", content: CEO_PLAN_PROMPT },
+      { role: "system", content: CEO_PLAN_PROMPT + skillsBlock() },
       { role: "user", content: userText.slice(0, 6000) },
     ],
     temperature: 0.3,
@@ -390,16 +409,41 @@ export async function planSubtasks(cfg, userText, signal, onToken) {
   return { subs, rationale };
 }
 
+// Scan a balanced JSON object starting at s[0] — strings may contain braces,
+// escaped quotes and newlines, which a regex can't handle. Returns the parsed
+// object, or null when the slice is truncated/malformed.
+function parseBalancedJSON(s) {
+  let inStr = false, esc = false, depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        try { return JSON.parse(s.slice(0, i + 1)); } catch { return null; }
+      }
+    }
+  }
+  return null;
+}
+
 // Detect a tool action line at the end of the agent's output.
 export function extractToolAction(text) {
   if (!text) return null;
   // The tool line is the last complete JSON object on its own line.
   const lines = text.trimEnd().split("\n");
   for (let i = lines.length - 1; i >= Math.max(0, lines.length - 3); i--) {
-    const m = lines[i].match(/\{"tool"\s*:\s*"[^"]+"\s*(?:,[^}]*)?\}/);
-    if (m) {
-      try { return JSON.parse(m[0].replace(/\\n/g, "\\n")); } catch { return null; }
-    }
+    const idx = lines[i].indexOf('{"tool"');
+    if (idx === -1) continue;
+    const obj = parseBalancedJSON(lines[i].slice(idx));
+    if (obj) return obj;
   }
   return null;
 }

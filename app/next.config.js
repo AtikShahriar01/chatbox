@@ -15,7 +15,7 @@ const csp = [
   "media-src 'self' data: blob:",
   "font-src 'self' data:",
   "connect-src 'self'",
-  "frame-src http://localhost:* http://127.0.0.1:*",
+  "frame-src 'self' http://localhost:* http://127.0.0.1:*",
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",

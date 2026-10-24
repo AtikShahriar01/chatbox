@@ -1,7 +1,12 @@
 // Server-side web search for the chat — no API key needed.
-// Uses DuckDuckGo's HTML endpoint (key-less) and optionally fetches the top
-// pages for extra context. Runs ONLY on the server (/api/web-search) so the
-// browser never hits CORS or exposes the user's IP to search engines directly.
+// Engine chain (first one that returns results wins):
+//   1. DuckDuckGo HTML endpoint (html.duckduckgo.com)
+//   2. DuckDuckGo Lite (lite.duckduckgo.com — different markup, survives
+//      changes to the main endpoint)
+//   3. Wikipedia search API (keyless, rock-solid, encyclopedic coverage)
+// Results are cached in-memory for 1h (searches repeat a lot in agent loops).
+// Optionally fetches the top pages for extra context. Runs ONLY on the server
+// (/api/web-search) so the browser never hits CORS or exposes the user's IP.
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36";
 
@@ -14,6 +19,23 @@ function decodeEntities(s = "") {
 
 function stripTags(s = "") { return decodeEntities(String(s).replace(/<[^>]*>/g, "")).trim(); }
 
+// ---- result caches -----------------------------------------------------------
+const searchCache = new Map(); // query → { at, results }
+const CACHE_TTL = 60 * 60 * 1000;
+const pageCache = new Map(); // url → { at, text }
+
+function cacheGet(map, key) {
+  const hit = map.get(key);
+  if (hit && Date.now() - hit.at < CACHE_TTL) return hit.value;
+  if (hit) map.delete(key);
+  return null;
+}
+function cacheSet(map, key, value) {
+  if (map.size > 200) map.delete(map.keys().next().value);
+  map.set(key, { at: Date.now(), value });
+}
+
+// ---- engines -----------------------------------------------------------------
 // Parse DuckDuckGo's HTML results (result__a links + result__snippet).
 export function parseDuckHtml(html) {
   const results = [];
@@ -36,16 +58,76 @@ export function parseDuckHtml(html) {
   return results;
 }
 
-// Search DuckDuckGo (HTML endpoint). Returns [{title, url, snippet}].
-export async function searchWeb(query, { limit = 6 } = {}) {
+// DuckDuckGo Lite: compact markup — result links carry class "result-link".
+export function parseDuckLite(html) {
+  const results = [];
+  const re = /<a[^>]+rel="nofollow"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+  let m;
+  while ((m = re.exec(html)) && results.length < 8) {
+    let url = decodeEntities(m[1]);
+    const uddg = url.match(/uddg=([^&]+)/);
+    if (uddg) url = decodeURIComponent(uddg[1]);
+    if (!/^https?:\/\//.test(url)) continue;
+    const title = stripTags(m[2]);
+    if (!title || /^duckduckgo/i.test(title)) continue;
+    results.push({ title, url, snippet: "" });
+  }
+  return results;
+}
+
+// Wikipedia search API — keyless and stable; snippet needs tag-stripping.
+export async function searchWikipedia(query, { limit = 6 } = {}) {
+  const url = `https://en.wikipedia.org/w/api.php?action=query&list=search&srlimit=${limit}&format=json&srsearch=${encodeURIComponent(query)}`;
+  const res = await fetch(url, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(12000) });
+  if (!res.ok) throw new Error(`wikipedia failed (${res.status})`);
+  const data = await res.json();
+  return (data?.query?.search || []).map((h) => ({
+    title: h.title,
+    url: `https://en.wikipedia.org/wiki/${encodeURIComponent(String(h.title).replace(/ /g, "_"))}`,
+    snippet: stripTags(h.snippet || ""),
+  }));
+}
+
+// DuckDuckGo HTML endpoint.
+export async function searchDuckHtml(query, { limit = 6 } = {}) {
   const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}&kl=wt-wt`;
   const res = await fetch(url, {
     headers: { "User-Agent": UA, "Accept-Language": "en-US,en;q=0.9,bn;q=0.8" },
     signal: AbortSignal.timeout(15000),
   });
   if (!res.ok) throw new Error(`search failed (${res.status})`);
-  const html = await res.text();
-  return parseDuckHtml(html).slice(0, limit);
+  return parseDuckHtml(await res.text()).slice(0, limit);
+}
+
+// DuckDuckGo Lite endpoint.
+export async function searchDuckLite(query, { limit = 6 } = {}) {
+  const url = `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`;
+  const res = await fetch(url, {
+    headers: { "User-Agent": UA, "Accept-Language": "en-US,en;q=0.9,bn;q=0.8" },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!res.ok) throw new Error(`lite search failed (${res.status})`);
+  return parseDuckLite(await res.text()).slice(0, limit);
+}
+
+// Search with the engine chain. Returns [{title, url, snippet}].
+export async function searchWeb(query, { limit = 6 } = {}) {
+  const cached = cacheGet(searchCache, query.toLowerCase().trim());
+  if (cached) return cached.slice(0, limit);
+  const engines = [searchDuckHtml, searchDuckLite, searchWikipedia];
+  let lastErr = null;
+  for (const engine of engines) {
+    try {
+      const results = await engine(query, { limit });
+      if (results.length > 0) {
+        cacheSet(searchCache, query.toLowerCase().trim(), results);
+        return results.slice(0, limit);
+      }
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw new Error(`all search engines failed${lastErr ? ` (last: ${String(lastErr.message || lastErr).slice(0, 120)})` : ""}`);
 }
 
 // Fetch a page and extract readable-ish text (script/style/nav stripped).
@@ -66,6 +148,8 @@ export function isPrivateHost(url) {
 export async function fetchPageText(url, { maxChars = 4500 } = {}) {
   if (!/^https?:\/\//i.test(url || "")) throw new Error("non-http url");
   if (isPrivateHost(url)) throw new Error("private target blocked");
+  const cached = cacheGet(pageCache, url);
+  if (cached) return cached.slice(0, maxChars);
   const res = await fetch(url, {
     headers: { "User-Agent": UA, Accept: "text/html,*/*" },
     signal: AbortSignal.timeout(12000),
@@ -81,6 +165,7 @@ export async function fetchPageText(url, { maxChars = 4500 } = {}) {
     .replace(/<footer[\s\S]*?<\/footer>/gi, " ")
     .replace(/<header[\s\S]*?<\/header>/gi, " ");
   const text = stripTags(html).replace(/\s+/g, " ").trim();
+  cacheSet(pageCache, url, text);
   return text.slice(0, maxChars);
 }
 

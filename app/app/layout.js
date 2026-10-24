@@ -1,4 +1,5 @@
 import "./globals.css";
+import "katex/dist/katex.min.css";
 import { Inter } from "next/font/google";
 
 const inter = Inter({

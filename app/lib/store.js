@@ -24,6 +24,10 @@ export const BUILTIN_MODELS = [
   { id: "xai/grok-2", name: "Grok 2", provider: "xAI", context: 131000, advanced: true, builtin: true, vision: false, tools: true, imageGen: false, thinking: false },
   { id: "meta-llama/llama-3.1-70b-instruct", name: "Llama 3.1 70B", provider: "Meta", context: 131000, advanced: true, builtin: true, vision: false, tools: true, imageGen: false, thinking: false },
   { id: "mistralai/mistral-large-latest", name: "Mistral Large", provider: "Mistral", context: 128000, advanced: true, builtin: true, vision: false, tools: true, imageGen: false, thinking: false },
+  // Image models — usable in image chats (Create Image); they hit
+  // /images/generations via /api/image, not /chat/completions.
+  { id: "openai/dall-e-3", name: "DALL·E 3", provider: "OpenAI", context: 4000, advanced: false, builtin: true, vision: false, tools: false, imageGen: true, thinking: false },
+  { id: "openai/gpt-image-1", name: "GPT Image 1", provider: "OpenAI", context: 4000, advanced: true, builtin: true, vision: false, tools: false, imageGen: true, thinking: false },
 ];
 
 export const PROMPT_SUGGESTIONS = [
@@ -134,6 +138,23 @@ export const useStore = create(
       chatInputDraft: "",
       setChatInputDraft: (v) => set({ chatInputDraft: v }),
 
+      // Per-chat input drafts — switching chats keeps what you were typing.
+      chatDrafts: {},
+      setChatDraft: (chatId, text) => {
+        if (!chatId) return;
+        set((s) => ({ chatDrafts: { ...(s.chatDrafts || {}), [chatId]: String(text || "").slice(0, 8000) } }));
+      },
+
+      // Saved prompt library — the "/" menu in the chat input lists these.
+      promptLibrary: [],
+      addPrompt: (name, text) => {
+        const p = { id: "prm_" + Math.random().toString(36).slice(2), name: String(name || "Prompt").slice(0, 60), text: String(text || "").slice(0, 8000), createdAt: Date.now() };
+        set((s) => ({ promptLibrary: [p, ...(s.promptLibrary || [])].slice(0, 100) }));
+        get().pushToast?.({ type: "success", message: `Prompt "${p.name}" saved — type / in the input to use it.` });
+        return p.id;
+      },
+      removePrompt: (id) => set((s) => ({ promptLibrary: (s.promptLibrary || []).filter((p) => p.id !== id) })),
+
       // Prompt Builder tool
       promptBuilderOpen: false,
       setPromptBuilderOpen: (v) => set({ promptBuilderOpen: v }),
@@ -146,6 +167,16 @@ export const useStore = create(
       // whole conversation replies in this language.
       chatLanguage: "en",
       setChatLanguage: (code) => set({ chatLanguage: code }),
+
+      // Parallel agent workers (Settings → Chat). 1 = sequential for strict
+      // free tiers; 2–4 = ZCode-style fan-out.
+      agentConcurrency: 2,
+      autoMemory: true,
+      lastBackupAt: null,
+
+      // Document chat (RAG-lite): embedding model used by /api/doc ingest
+      // and query. Empty = the provider's default. OpenAI-compatible only.
+      embeddingModel: "",
 
       // Clipboard collection: every Copy inside the app is remembered here.
       // Ctrl+V in the chat input pastes ALL collected items (most recent
@@ -282,6 +313,9 @@ export const useStore = create(
           id: newId(),
           title: "Image generation",
           pinned: false,
+          // imageMode routes sends to /api/image instead of the chat proxy —
+          // ChatPanel checks this flag (the pipeline is real, not cosmetic).
+          imageMode: true,
           messages: [],
           createdAt: Date.now(),
         };
@@ -345,6 +379,42 @@ export const useStore = create(
               ? { ...c, messages: c.messages.map((m) => (m.id === msgId ? { ...m, ...newMsg } : m)) }
               : c
           ),
+        }));
+      },
+      // Context compaction cache (per chat): the summary of everything that
+      // fell out of the context window, and the message id it covers, so a
+      // summary is generated once and reused until the window moves.
+      setChatCompaction: (chatId, compaction) => set((s) => ({
+        chats: s.chats.map((c) => (c.id === chatId ? { ...c, compaction } : c)),
+      })),
+
+      // Message branching — regenerate carries the previous replies onto the
+      // new assistant message as `variants` (plus a snapshot of this one), so
+      // every version stays browsable via ‹ x/n › in the bubble header. The
+      // message's top-level fields remain the ACTIVE version, so all rendering
+      // paths (markdown, token badge, actions) keep working unchanged.
+      carryVariants: (chatId, msgId, prior = []) => {
+        const FIELDS = ["content", "reasoning", "reasoningMs", "model", "usage", "costUSD", "elapsedMs", "stopped", "error", "errorDetail", "webSources", "images", "altText"];
+        set((s) => ({
+          chats: s.chats.map((c) => (c.id === chatId ? {
+            ...c,
+            messages: c.messages.map((m) => (m.id === msgId ? {
+              ...m,
+              variants: [...prior, Object.fromEntries(FIELDS.map((f) => [f, m[f] ?? null]))],
+              variantIndex: prior.length,
+            } : m)),
+          } : c)),
+        }));
+      },
+      setMessageVariant: (chatId, msgId, idx) => {
+        set((s) => ({
+          chats: s.chats.map((c) => (c.id === chatId ? {
+            ...c,
+            messages: c.messages.map((m) => {
+              if (m.id !== msgId || !m.variants?.[idx]) return m;
+              return { ...m, ...m.variants[idx], variantIndex: idx };
+            }),
+          } : c)),
         }));
       },
       // Patch a single subtask inside a message's orchestration state.
@@ -571,8 +641,11 @@ export const useStore = create(
         return { _inFlightPreviews: prevMap, _inFlightPreview: null, todayUsage: { ...t0, costUSD: backed, costBDT: backed * (s.fxRateBDT || 110) } };
       }),
 
-      // Per-chat cumulative cost (sum of all assistant messages)
-      accumulateChatCost: (chatId, costUSD) => {
+      // Per-chat cumulative cost (sum of all assistant messages). `usage` is
+      // this message's {promptTokens, completionTokens, reasoningTokens,
+      // cachedTokens}; the c.lastUsage fallback only covers legacy callers
+      // that never passed it.
+      accumulateChatCost: (chatId, costUSD, usage = null) => {
         if (!costUSD) return;
         set((s) => ({
           chats: s.chats.map((c) => c.id === chatId ? {
@@ -580,10 +653,10 @@ export const useStore = create(
             cumulativeCostUSD: (c.cumulativeCostUSD || 0) + costUSD,
             cumulativeCostBDT: (c.cumulativeCostBDT || 0) + costUSD * (s.fxRateBDT || 110),
             cumulativeTokens: {
-              prompt: (c.cumulativeTokens?.prompt || 0) + (c.lastUsage?.prompt || 0),
-              completion: (c.cumulativeTokens?.completion || 0) + (c.lastUsage?.completion || 0),
-              reasoning: (c.cumulativeTokens?.reasoning || 0) + (c.lastUsage?.reasoning || 0),
-              cached: (c.cumulativeTokens?.cached || 0) + (c.lastUsage?.cached || 0),
+              prompt: (c.cumulativeTokens?.prompt || 0) + (usage?.promptTokens ?? c.lastUsage?.prompt ?? 0),
+              completion: (c.cumulativeTokens?.completion || 0) + (usage?.completionTokens ?? c.lastUsage?.completion ?? 0),
+              reasoning: (c.cumulativeTokens?.reasoning || 0) + (usage?.reasoningTokens ?? c.lastUsage?.reasoning ?? 0),
+              cached: (c.cumulativeTokens?.cached || 0) + (usage?.cachedTokens ?? c.lastUsage?.cached ?? 0),
             },
           } : c),
         }));
@@ -704,6 +777,25 @@ export const useStore = create(
       },
 
       setSetting: (key, val) => set({ [key]: val }),
+      // skills: user-defined agent skills injected into agent/CEO prompts (§skills)
+      skills: [],
+      addSkill: (skill) => {
+        const s = { id: "sk_" + Math.random().toString(36).slice(2), name: String(skill.name || "Skill").slice(0, 40), description: String(skill.description || "").slice(0, 200), prompt: String(skill.prompt || "").slice(0, 4000), enabled: skill.enabled !== false };
+        set((st) => ({ skills: [...st.skills, s] }));
+        get().pushToast?.({ type: "success", message: `Skill "${s.name}" saved.` });
+        return s.id;
+      },
+      updateSkill: (id, patch) => set((st) => ({ skills: st.skills.map((s) => (s.id === id ? { ...s, ...patch } : s)) })),
+      removeSkill: (id) => set((st) => ({ skills: st.skills.filter((s) => s.id !== id) })),
+      // schedules: time-based automations run by lib/scheduler.js while the app is open
+      schedules: [],
+      addSchedule: (schedule) => {
+        const s = { id: "scd_" + Math.random().toString(36).slice(2), prompt: String(schedule.prompt || "").slice(0, 2000), kind: schedule.kind === "daily" ? "daily" : "interval", everyMinutes: Math.max(5, Math.min(10080, Number(schedule.everyMinutes) || 60)), dailyTime: String(schedule.dailyTime || "09:00"), enabled: schedule.enabled !== false, lastRun: null, nextRun: null };
+        set((st) => ({ schedules: [...st.schedules, s] }));
+        return s.id;
+      },
+      updateSchedule: (id, patch) => set((st) => ({ schedules: st.schedules.map((s) => (s.id === id ? { ...s, ...patch } : s)) })),
+      removeSchedule: (id) => set((st) => ({ schedules: st.schedules.filter((s) => s.id !== id) })),
     }),
     {
       name: "chatbox-clone-state-v3",
@@ -744,6 +836,15 @@ export const useStore = create(
         pcWorkspace: s.pcWorkspace,
         chatLanguage: s.chatLanguage,
         clipCabinet: s.clipCabinet.slice(0, 10),
+        chatDrafts: s.chatDrafts,
+        promptLibrary: s.promptLibrary,
+        embeddingModel: s.embeddingModel,
+        skills: s.skills,
+        schedules: s.schedules,
+        memory: s.memory,
+        agentConcurrency: s.agentConcurrency,
+        autoMemory: s.autoMemory,
+        lastBackupAt: s.lastBackupAt,
         monthlyUsage: s.monthlyUsage,
         todayUsage: s.todayUsage,
       }),

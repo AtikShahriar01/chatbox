@@ -1,10 +1,19 @@
 "use client";
 
-import { useStore, PROMPT_SUGGESTIONS } from "@/lib/store";
+import { useStore, PROMPT_SUGGESTIONS, BUILTIN_MODELS } from "@/lib/store";
 import MessageBubble from "./MessageBubble";
 import ChatInput from "./ChatInput";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { KeyRound, AlertCircle, User, Check } from "lucide-react";
+import { KeyRound, AlertCircle, User, Check, Image as ImageIcon } from "lucide-react";
+import { Virtuoso } from "react-virtuoso";
+import { notifyDone, resetUnread } from "@/lib/notify";
+import { callModel } from "@/lib/agents";
+import { storeImage, getImage } from "@/lib/image-store";
+
+// Long chats render every bubble (markdown + highlight.js each) — past this
+// threshold the list switches to react-virtuoso windowing. Below it the
+// original DOM path is used unchanged (entrance animations, no measuring).
+const VIRTUALIZE_AT = 60;
 import { AnimatePresence, motion } from "motion/react";
 import EmptyState from "./EmptyState";
 import StopButton from "./StopButton";
@@ -109,6 +118,8 @@ async function runAgentInChat({ chatId, asstId, text, replaceMessage, pushToast,
     },
     webSources: null,
   });
+  // Long run finished — badge/notify when the tab is in the background.
+  notifyDone(`Agent task ${effStatus}: ${summary || ""}`.slice(0, 120));
   return { ok: liveTask.status === "completed" };
 }
 
@@ -135,6 +146,11 @@ export default function ChatPanel() {
   const recordUsage = useStore((s) => s.recordUsage);
   const previewUsage = useStore((s) => s.previewUsage);
   const accumulateChatCost = useStore((s) => s.accumulateChatCost);
+  const carryVariants = useStore((s) => s.carryVariants);
+  const setChatCompaction = useStore((s) => s.setChatCompaction);
+  const setMessageVariant = useStore((s) => s.setMessageVariant);
+  const embeddingModel = useStore((s) => s.embeddingModel) || "";
+  const customModels = useStore((s) => s.customModels);
   const chatLanguage = useStore((s) => s.chatLanguage) || "en";
 
   const [busy, setBusy] = useState(false);
@@ -150,6 +166,7 @@ export default function ChatPanel() {
   const capturedCostRef = useRef(null);
   const orchAbortRef = useRef(null);
   const planApprovalRef = useRef(null); // { resolve } while awaiting plan approval
+  const branchCarryRef = useRef(null);  // previous replies carried onto the regenerated one
 
   const chat = useMemo(() => chats.find((c) => c.id === activeChatId) || null, [chats, activeChatId]);
 
@@ -157,20 +174,48 @@ export default function ChatPanel() {
   // streaming we only scroll if the user is already near the bottom, so
   // reading older messages is never yanked around. The last message's
   // content/reasoning lengths are in deps so streaming output follows.
+  // In the virtualized long-chat mode the scroller is Virtuoso's internal
+  // one — resolve it via the Virtuoso ref first.
+  const virtRef = useRef(null);
   useEffect(() => {
-    const el = scrollRef.current;
+    const el = virtRef.current?.scrollElement || scrollRef.current;
     if (!el) return;
     requestAnimationFrame(() => {
-      if (!scrollRef.current) return;
-      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 260;
+      const target = virtRef.current?.scrollElement || scrollRef.current;
+      if (!target) return;
+      const nearBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 260;
       if (busy && !nearBottom) return;
-      el.scrollTo({ top: el.scrollHeight, behavior: busy ? "auto" : "smooth" });
+      target.scrollTo({ top: target.scrollHeight, behavior: busy ? "auto" : "smooth" });
     });
-  }, [chat?.messages?.length, busy, chat?.id, chat?.messages?.[chat?.messages?.length - 1]?.content?.length, chat?.messages?.[chat?.messages?.length - 1]?.reasoning?.length]);
+  }, [chat?.messages?.length, busy, chat?.id, chat?.messages?.[chat?.messages?.length - 1]?.content?.length, chat?.messages?.[chat?.messages?.length - 1]?.reasoning?.length, chat?.messages?.[chat?.messages?.length - 1]?.images?.length]);
 
   useEffect(() => {
     if (!activeChatId && chats.length > 0) setActive(chats[0].id);
   }, [activeChatId, chats.length, setActive]);
+
+  // Global stop hook: the page-level Esc handler dispatches cb:stop-gen when
+  // no modal wants the key — this makes "Esc stops generation" real, same as
+  // the Stop button. stop() only touches refs, so a fresh closure per render
+  // is safe (no deps array on purpose).
+  useEffect(() => {
+    const onStop = () => stop();
+    window.addEventListener("cb:stop-gen", onStop);
+    return () => window.removeEventListener("cb:stop-gen", onStop);
+  });
+
+  // ---- done-notifications (unread badge in the tab title + system toast) ----
+  // Fires only when the tab is NOT focused: a long reply/agent run finishing
+  // while you're in another window shows "(1) Chatbox" and (with permission)
+  // a system notification. Focus resets the counter.
+  useEffect(() => {
+    const reset = () => { if (document.hasFocus()) resetUnread(); };
+    window.addEventListener("focus", reset);
+    document.addEventListener("visibilitychange", reset);
+    return () => {
+      window.removeEventListener("focus", reset);
+      document.removeEventListener("visibilitychange", reset);
+    };
+  }, []);
 
   // Orphan recovery: after a page reload no stream can still be running, so
   // any message stuck in thinking/streaming state would hang forever. Runs
@@ -194,12 +239,63 @@ export default function ChatPanel() {
     if (dirty) useStore.setState({ chats: chatsPatched });
   }, [chats]);
 
-  const send = async (text, images = []) => {
+  const send = async (text, images = [], docs = []) => {
     if (inFlightRef.current) return;
     let id = chat?.id;
     if (!id) { id = createChat(); setActive(id); }
-    return sendInChat(id, text, images);
+    return sendInChat(id, text, images, docs);
   };
+
+  // Auto-memory (ZCode-style continuity): every ~8 messages, a tiny
+  // background call extracts durable facts into long-term memory. Silent on
+  // failure — never blocks or breaks the chat.
+  const maybeExtractMemory = async (chatId) => {
+    const st = useStore.getState();
+    if (!st.autoMemory || !st.memory?.enabled) return;
+    try {
+      const chat = st.chats.find((c) => c.id === chatId);
+      if (!chat) return;
+      const msgs = chat.messages || [];
+      if (msgs.length < (chat.memoryAtCount || 0) + 8) return;
+      const recent = msgs.slice(-8).map((m) => `${m.role}: ${String(m.content || "").slice(0, 300)}`).join("\n").slice(0, 4000);
+      const r = await callModel({
+        apiBaseUrl, apiKey, apiModel,
+        messages: [
+          { role: "system", content: "Extract durable facts (user preferences, project stack, names, ongoing goals) from this exchange. Reply with ONLY a JSON array of short strings (max 4). Return [] if nothing durable." },
+          { role: "user", content: recent },
+        ],
+        temperature: 0.2, maxTokens: 250,
+      });
+      const m = /\[[\s\S]*\]/.exec(r?.content || "");
+      const facts = m ? JSON.parse(m[0]) : [];
+      if (Array.isArray(facts)) {
+        const wsKey = st.pcWorkspace || "(default)";
+        const existing = (st.memory?.project?.[wsKey] || []).map((x) => x.toLowerCase());
+        for (const f of facts.slice(0, 4)) {
+          const line = String(f).trim().slice(0, 200);
+          if (line && !existing.includes(line.toLowerCase())) {
+            useStore.getState().rememberMemory("project", line, wsKey);
+            existing.push(line.toLowerCase());
+          }
+        }
+      }
+      useStore.setState((s) => ({ chats: s.chats.map((c) => (c.id === chatId ? { ...c, memoryAtCount: msgs.length } : c)) }));
+    } catch {}
+  };
+
+  // Scheduler: lib/scheduler.js computes due automations and dispatches
+  // cb:schedule-run — each run starts a fresh chat here.
+  useEffect(() => {
+    const onRun = (e) => {
+      const prompt = e.detail?.prompt;
+      if (!prompt || inFlightRef.current) return;
+      const id = createChat();
+      setActive(id);
+      setTimeout(() => sendInChat(id, prompt), 50);
+    };
+    window.addEventListener("cb:schedule-run", onRun);
+    return () => window.removeEventListener("cb:schedule-run", onRun);
+  });
 
   const stop = () => {
     if (abortRef.current) {
@@ -237,27 +333,102 @@ export default function ChatPanel() {
     if (finalize) pendingFlushRef.current = null;
   };
 
-  const sendInChat = async (chatId, text, images = []) => {
+  // Image-generation turn for imageMode chats (the "Create Image" button).
+  // One user turn → one results message via /api/image (b64 data URLs).
+  const generateImage = async (chatId, promptText) => {
+    const asstId = "msg_" + Math.random().toString(36).slice(2);
+    addMessage(chatId, { id: "msg_" + Math.random().toString(36).slice(2), role: "user", content: promptText });
+    setChatTitleIfEmpty(chatId, promptText.slice(0, 40) + (promptText.length > 40 ? "…" : ""));
+    addMessage(chatId, { id: asstId, role: "assistant", content: "", model: apiModel, thinking: true });
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    try {
+      const res = await fetch("/api/image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiBaseUrl, apiKey, model: apiModel, prompt: promptText }),
+        signal: ctrl.signal,
+      });
+      if (res.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        replaceMessage(chatId, asstId, {
+          thinking: false, streaming: false, model: apiModel,
+          error: `Image generation failed (API ${res.status})`,
+          errorDetail: errText.slice(0, 600) || "Pick an image model (e.g. DALL·E 3) in the model selector — the provider must support /images/generations.",
+        });
+        return;
+      }
+      const data = await res.json().catch(() => null);
+      if (!data?.ok || !data.images?.length) {
+        replaceMessage(chatId, asstId, {
+          thinking: false, streaming: false, model: apiModel,
+          error: "Provider returned no images",
+          errorDetail: "Check the model id — it must be an image model (dall-e-3, gpt-image-1, …).",
+        });
+        return;
+      }
+      const stored = await Promise.all((data.images || []).map((img) => storeImage(img)));
+      replaceMessage(chatId, asstId, {
+        thinking: false, streaming: false, model: apiModel,
+        content: "", images: stored, altText: promptText.slice(0, 200),
+      });
+    } catch (e) {
+      replaceMessage(chatId, asstId, {
+        thinking: false, streaming: false, model: apiModel,
+        ...(e?.name === "AbortError"
+          ? { stopped: true }
+          : { error: "Image generation failed", errorDetail: String(e?.message || e).slice(0, 400) }),
+      });
+    } finally {
+      abortRef.current = null;
+      setBusy(false);
+      inFlightRef.current = false;
+    }
+  };
+
+  const sendInChat = async (chatId, text, images = [], docs = []) => {
     if (inFlightRef.current) return;
+    // Notification permission needs a user gesture — asking here (a send
+    // click) is the natural moment. Ignored if already granted/denied.
+    try { if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") Notification.requestPermission().catch(() => {}); } catch {}
     // Budget hard-limit (§8): block a new request once the enforced monthly
     // budget is reached, with a clear message instead of silently spending.
     if (useStore.getState().isOverBudget()) {
       const b = useStore.getState().monthlyBudgetUSD;
       pushToast({ type: "warning", message: `মাসিক বাজেট শেষ ($${b}). Settings → Usage-তে enforce বন্ধ করুন বা বাজেট বাড়ান।` });
-      const id2 = useStore.getState().createChat();
-      setActive(id2);
-      addMessage(id2, { id: "msg_" + Math.random().toString(36).slice(2), role: "user", content: text });
-      addMessage(id2, { id: "msg_" + Math.random().toString(36).slice(2), role: "assistant", content: "", error: "Monthly budget reached", errorDetail: `Enforced limit $${b} reached. Disable enforcement or raise the budget in Settings.` });
+      // Surface the block in the CURRENT chat — a fresh chat would lose context.
+      addMessage(chatId, { id: "msg_" + Math.random().toString(36).slice(2), role: "user", content: text, ...(images?.length ? { images } : {}) });
+      addMessage(chatId, { id: "msg_" + Math.random().toString(36).slice(2), role: "assistant", content: "", error: "Monthly budget reached", errorDetail: `Enforced limit $${b} reached. Disable enforcement or raise the budget in Settings → Usage.` });
       return;
     }
     inFlightRef.current = true;
     setBusy(true);
 
-    // For vision: convert images to data URLs to send in user content
-    const userContent = images.length
-      ? [{ type: "text", text }, ...images.map((img) => ({ type: "image_url", image_url: { url: img } }))]
+    // Image-generation chat (Create Image): route to /api/image instead of
+    // the chat SSE proxy — image models don't speak chat completions.
+    if (useStore.getState().chats.find((c) => c.id === chatId)?.imageMode) {
+      try {
+        await generateImage(chatId, text);
+      } finally {
+        // generateImage resets busy/inFlight in its own finally; guard anyway.
+        inFlightRef.current = false;
+        setBusy(false);
+      }
+      return;
+    }
+
+    // Images go to IndexedDB (localStorage quota!) - messages carry small
+    // "idb:<id>" references; resolved back to data URLs for the API payload.
+    const resolvedNew = await Promise.all((images || []).map((img) => getImage(img)));
+    const storedImages = await Promise.all((images || []).map((img) => storeImage(img)));
+    const userContent = resolvedNew.length
+      ? [{ type: "text", text }, ...resolvedNew.filter(Boolean).map((img) => ({ type: "image_url", image_url: { url: img } }))]
       : text;
-    const userMsg = { id: "msg_" + Math.random().toString(36).slice(2), role: "user", content: text, images };
+    const userMsg = { id: "msg_" + Math.random().toString(36).slice(2), role: "user", content: text, images: storedImages, ...(docs?.length ? { attachments: docs } : {}) };
     addMessage(chatId, userMsg);
     setChatTitleIfEmpty(chatId, text.slice(0, 40) + (text.length > 40 ? "…" : ""));
 
@@ -266,7 +437,44 @@ export default function ChatPanel() {
     // History = everything EXCEPT the user message we just added (it is
     // appended explicitly at the end below — otherwise the model receives
     // the same user turn twice).
-    const recentMessages = (targetChat?.messages || []).slice(0, -1).slice(-maxContext * 2);
+    const allHistory = (targetChat?.messages || []).slice(0, -1);
+    const keepCount = maxContext * 2;
+    const dropped = allHistory.length > keepCount ? allHistory.slice(0, allHistory.length - keepCount) : [];
+    const recentMessages = allHistory.slice(-keepCount);
+
+    // ---- Context compaction (ZCode-style): the dropped prefix is summarized
+    // ONCE and cached on the chat (compaction.untilMsgId), so long
+    // conversations keep their beginning instead of silently forgetting it.
+    let compactionText = "";
+    if (dropped.length > 0) {
+      const lastDroppedId = dropped[dropped.length - 1].id;
+      if (targetChat?.compaction?.untilMsgId === lastDroppedId) {
+        compactionText = targetChat.compaction.text || "";
+      } else {
+        try {
+          const prev = targetChat?.compaction?.text || "";
+          const transcript = dropped.map((m) => `${m.role}: ${String(m.content || "").slice(0, 500)}`).join("\n").slice(0, 9000);
+          const sum = await callModel({
+            apiBaseUrl, apiKey, apiModel,
+            messages: [
+              { role: "system", content: "Compress the earlier conversation into a dense continuation summary: facts, decisions, file names, user preferences, open threads. Under 300 words. Reply with ONLY the summary text." },
+              { role: "user", content: (prev ? `Previous summary:\n${prev}\n\n` : "") + `Messages to fold in:\n${transcript}` },
+            ],
+            temperature: 0.2, maxTokens: 600,
+          });
+          if (sum?.content?.trim()) {
+            compactionText = sum.content.trim();
+            setChatCompaction(chatId, { untilMsgId: lastDroppedId, text: compactionText });
+            if (sum.usage && (sum.usage.promptTokens || sum.usage.completionTokens)) {
+              const c = computeCost(apiModel, sum.usage, modelPricing);
+              recordUsage(apiModel, sum.usage, c);
+              accumulateChatCost(chatId, c, sum.usage);
+            }
+          }
+        } catch {}
+        if (!compactionText) compactionText = targetChat?.compaction?.text || "";
+      }
+    }
 
     // OpenAI format messages with content as string OR array.
     // The selected chat language is injected as a hard rule so the AI
@@ -281,18 +489,44 @@ export default function ChatPanel() {
       "ar-SA": "Always reply in Arabic (العربية, natural professional tone). Code stays English.",
     };
     const langRule = LANG_RULES[chatLanguage] || "";
-    const finalSystem = (langRule
+    let finalSystem = (langRule
       ? `${systemPrompt || "You are a helpful assistant."}\n\nLANGUAGE RULE (must follow): ${langRule}`
       : (systemPrompt || "You are a helpful assistant."))
-      + (useStore.getState().buildMemoryPrompt("") || "");
+      + (useStore.getState().buildMemoryPrompt("") || "")
+      + (compactionText ? `
+
+[Earlier conversation summary — continuity context]
+${compactionText.slice(0, 4000)}` : "");
+
+    // Document chat (RAG-lite): retrieve the most relevant excerpts of every
+    // attached document and ground the answer in them.
+    if (docs?.length) {
+      for (const d of docs.slice(0, 4)) {
+        try {
+          const r = await fetch("/api/document", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ op: "query", apiBaseUrl, apiKey, model: embeddingModel, docId: d.docId, query: text || d.name }),
+          });
+          const data = await r.json().catch(() => null);
+          if (data?.ok && data.chunks?.length) {
+            finalSystem += `\n\n--- Attached document: ${d.name} (most relevant excerpts) ---\n${data.chunks.map((c) => c.text).join("\n---\n")}`;
+          }
+        } catch {}
+      }
+      finalSystem += "\n\nINSTRUCTION: when the attached document excerpts above are relevant, base your answer primarily on them and cite the document name.";
+    }
     let messagesForApi = [
       { role: "system", content: finalSystem },
-      ...recentMessages.map((m) => {
+      ...(await Promise.all(recentMessages.map(async (m) => {
         if (m.images && m.images.length && m.role === "user") {
-          return { role: m.role, content: [{ type: "text", text: m.content }, ...m.images.map((img) => ({ type: "image_url", image_url: { url: img } }))] };
+          const resolved = (await Promise.all(m.images.map((img) => getImage(img)))).filter(Boolean);
+          if (resolved.length) {
+            return { role: m.role, content: [{ type: "text", text: m.content }, ...resolved.map((img) => ({ type: "image_url", image_url: { url: img } }))] };
+          }
         }
         return { role: m.role, content: m.content };
-      }),
+      }))),
       { role: "user", content: userContent },
     ];
     let webSources = null;
@@ -420,6 +654,8 @@ export default function ChatPanel() {
             ],
             pcAvailable,
             pcWorkspace: useStore.getState().pcWorkspace || "",
+            // Parallel workers (Settings → Chat → Parallel agents)
+            concurrency: useStore.getState().agentConcurrency || 1,
             // ZCode-style plan mode: agents wait for the user's explicit
             // approval of the analysis + team plan before starting work.
             requirePlanApproval: true,
@@ -462,7 +698,8 @@ export default function ChatPanel() {
           const usageObj = { promptTokens: estIn, completionTokens: estOut };
           const cost = computeCost(apiModel, usageObj, modelPricing);
           recordUsage(apiModel, usageObj, cost);
-          accumulateChatCost(chatId, cost);
+          accumulateChatCost(chatId, cost, usageObj);
+          notifyDone(st.review || "Agent team finished");
         } else if (result.kind === "aborted" || result.kind === "stopped") {
           // "stopped" covers both Stop-button aborts and plan-approval Deny —
           // neither is a failure, so don't render a red "Orchestration failed".
@@ -538,6 +775,9 @@ export default function ChatPanel() {
       const RETRYABLE = (st) => st === 429 || st === 502 || st === 503 || st === 504;
       let res = null;
       let lastErrText = "";
+      // Declared OUTSIDE the retry loop — the fallback-model block below reads
+      // and reassigns it after the loop has ended.
+      let activeModel = apiModel;
       for (let attempt = 0; attempt <= 2; attempt++) {
         if (attempt > 0) {
           replaceMessage(chatId, asstId, {
@@ -552,7 +792,6 @@ export default function ChatPanel() {
             throw abortErr;
           }
         }
-        let activeModel = apiModel;
       try {
           res = await fetch("/api/chat", {
             method: "POST",
@@ -596,6 +835,7 @@ export default function ChatPanel() {
       if (!res || !res.ok) {
         const errText = lastErrText;
         if (flushTimerRef.current) clearInterval(flushTimerRef.current);
+        branchCarryRef.current = null; // a failed regen has no new variant to carry
         // Session expired mid-chat → re-authenticate rather than show a raw error.
         if (res && res.status === 401) {
           window.location.href = "/login";
@@ -694,6 +934,7 @@ export default function ChatPanel() {
       // Use the captured refs that survive timer nulling the flush ref
       const finalUsage = capturedUsageRef.current || pendingFlushRef.current?.usage;
       const finalCost = capturedCostRef.current ?? pendingFlushRef.current?.costUSD;
+      const doneText = pendingFlushRef.current?.text || "";
       if (pendingFlushRef.current) {
         pendingFlushRef.current.elapsedMs = performance.now() - streamStartRef.current;
         // "Thought for Ns": first reasoning delta → first content delta.
@@ -707,8 +948,19 @@ export default function ChatPanel() {
       if (finalUsage && (finalUsage.promptTokens || finalUsage.completionTokens)) {
         const cost = finalCost ?? computeCost(apiModel, finalUsage, modelPricing);
         recordUsage(apiModel, finalUsage, cost);
-        accumulateChatCost(chatId, cost);
+        accumulateChatCost(chatId, cost, finalUsage);
       }
+      // Branching: a regenerated reply carries the previous versions as
+      // browsable variants (set by regenerate() before it re-sends).
+      if (branchCarryRef.current) {
+        const carry = branchCarryRef.current;
+        branchCarryRef.current = null;
+        carryVariants?.(chatId, asstId, carry);
+      }
+      // Unread badge / system notification when the tab wasn't focused.
+      notifyDone(doneText);
+      // Auto-memory: every ~8 messages fold durable facts into long-term memory.
+      maybeExtractMemory(chatId);
     } catch (e) {
       if (e?.name === "AbortError") {
         if (pendingFlushRef.current) {
@@ -757,10 +1009,15 @@ export default function ChatPanel() {
       if (msgs[i].role === "user") { lastUserIdx = i; break; }
     }
     if (lastUserIdx === -1) return;
+    // Branching: the reply being replaced joins the new one as a variant.
+    // branchCarryRef travels through sendInChat and is attached to the fresh
+    // assistant message at finalize (carryVariants).
+    const oldReply = msgs[lastUserIdx + 1];
+    branchCarryRef.current = oldReply?.role === "assistant" ? [...(oldReply.variants || [])] : null;
     // Drop the last user message too — sendInChat re-adds it fresh. Keeping it
     // here would show the same user bubble twice after regeneration.
     truncateMessagesAfter(chat.id, lastUserIdx - 1);
-    await sendInChat(chat.id, msgs[lastUserIdx].content, msgs[lastUserIdx].images || []);
+    await sendInChat(chat.id, msgs[lastUserIdx].content, msgs[lastUserIdx].images || [], msgs[lastUserIdx].attachments || []);
   };
 
   const editAndResend = async (msgId) => {
@@ -807,13 +1064,63 @@ export default function ChatPanel() {
 
   const noKey = !apiKey && !(apiBaseUrl.includes("11434") || apiBaseUrl.includes("ollama") || apiBaseUrl.includes("1234") || apiBaseUrl.includes("lm-studio") || apiBaseUrl.includes("localhost") || apiBaseUrl.includes("127.0.0.1"));
 
+  // Context window gauge — current chat's estimated tokens vs the model window.
+  const activeModelMeta = [...(customModels || []), ...BUILTIN_MODELS].find((m) => m.id === apiModel);
+  const contextSize = activeModelMeta?.context || 0;
+  const contextUsed = chat ? estimateMessagesTokens(chat.messages.slice(-(maxContext * 2))) : 0;
+
+  // One bubble (or the edit form) — shared by the plain and virtualized paths.
+  const renderMessage = (m, i) =>
+    editingId === m.id ? (
+      <EditForm
+        key={m.id}
+        initial={m.content}
+        onCancel={() => setEditingId(null)}
+        onSave={(text) => onEditSubmit(m.id, text)}
+      />
+    ) : (
+      <MessageBubble
+        key={m.id}
+        message={m}
+        chatId={chat.id}
+        onEditCode={(subId, newCode) => {
+          // Patch the subtask's story inside this message so the
+          // popup's Save keeps the edited code permanently.
+          useStore.getState().updateOrchSubtask(chat.id, m.id, subId, (patch) => {
+            const s = useStore.getState().chats.find((c) => c.id === chat.id)?.messages.find((x) => x.id === m.id);
+            const st = s?.orchestration?.subtasks.find((x) => x.id === subId);
+            return { story: { ...(st?.story || {}), code: newCode } };
+          });
+        }}
+        onInsertChat={(code) => useStore.getState().setChatInputDraft(code)}
+        onPlanDecision={(allow) => {
+          // Resolve the plan gate: true → agents start, false → run stops.
+          if (planApprovalRef.current) {
+            planApprovalRef.current.resolve(allow);
+            planApprovalRef.current = null;
+          }
+        }}
+        isLast={i === chat.messages.length - 1}
+        onRegenerate={m.role === "assistant" ? regenerate : undefined}
+        onEdit={m.role === "user" ? () => editAndResend(m.id) : undefined}
+        onFeedback={(v) => setFeedback(m.id, v)}
+        onVariant={(d) => {
+          // ‹ x/n › variant switcher — swap the active reply version.
+          const n = m.variants?.length || 0;
+          if (!n) return;
+          const cur = m.variantIndex ?? n - 1;
+          setMessageVariant(chat.id, m.id, (cur + d + n) % n);
+        }}
+      />
+    );
+
   if (!chat) {
     return (
       <div className="flex-1 flex flex-col min-h-0 min-w-0">
         {noKey && <NoKeyBar onOpen={() => setSettingsOpen(true)} />}
         <EmptyState onPick={startWithPrompt} onNew={() => createChat()} />
         <div className="max-w-3xl w-full mx-auto shrink-0">
-          <ChatInput onSend={send} disabled={busy} stop={stop} busy={busy} webSearch={webSearch} onToggleWebSearch={() => setWebSearch((v) => !v)} />
+          <ChatInput onSend={send} disabled={busy} stop={stop} busy={busy} webSearch={webSearch} onToggleWebSearch={() => setWebSearch((v) => !v)} contextUsed={contextUsed} contextSize={contextSize} />
         </div>
       </div>
     );
@@ -827,47 +1134,27 @@ export default function ChatPanel() {
 
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto" style={{ background: "var(--cb-bg)" }}>
         {chat.messages.length === 0 ? (
-          <EmptyState onPick={(s) => sendInChat(chat.id, s.prompt)} />
+          chat.imageMode ? (
+            <ImageEmptyHint />
+          ) : (
+            <EmptyState onPick={(s) => sendInChat(chat.id, s.prompt)} />
+          )
+        ) : chat.messages.length > VIRTUALIZE_AT ? (
+          // Long chat: windowed rendering. The auto-scroll effect targets
+          // virtRef.current.scrollElement so streaming still follows the tail.
+          <Virtuoso
+            ref={virtRef}
+            key={chat.id}
+            data={chat.messages}
+            style={{ height: "100%" }}
+            increaseViewportBy={{ top: 800, bottom: 1200 }}
+            initialTopMostItemIndex={chat.messages.length - 1}
+            itemContent={(i, m) => <div className="max-w-3xl mx-auto">{renderMessage(m, i)}</div>}
+          />
         ) : (
           <div className="max-w-3xl mx-auto py-4">
             <AnimatePresence initial={false}>
-              {chat.messages.map((m, i) => (
-                editingId === m.id ? (
-                  <EditForm
-                    key={m.id}
-                    initial={m.content}
-                    onCancel={() => setEditingId(null)}
-                    onSave={(text) => onEditSubmit(m.id, text)}
-                  />
-                ) : (
-                  <MessageBubble
-                    key={m.id}
-                    message={m}
-                    chatId={chat.id}
-                    onEditCode={(subId, newCode) => {
-                      // Patch the subtask's story inside this message so the
-                      // popup's Save keeps the edited code permanently.
-                      useStore.getState().updateOrchSubtask(chat.id, m.id, subId, (patch) => {
-                        const s = useStore.getState().chats.find((c) => c.id === chat.id)?.messages.find((x) => x.id === m.id);
-                        const st = s?.orchestration?.subtasks.find((x) => x.id === subId);
-                        return { story: { ...(st?.story || {}), code: newCode } };
-                      });
-                    }}
-                    onInsertChat={(code) => useStore.getState().setChatInputDraft(code)}
-                    onPlanDecision={(allow) => {
-                      // Resolve the plan gate: true → agents start, false → run stops.
-                      if (planApprovalRef.current) {
-                        planApprovalRef.current.resolve(allow);
-                        planApprovalRef.current = null;
-                      }
-                    }}
-                    isLast={i === chat.messages.length - 1}
-                    onRegenerate={m.role === "assistant" ? regenerate : undefined}
-                    onEdit={m.role === "user" ? () => editAndResend(m.id) : undefined}
-                    onFeedback={(v) => setFeedback(m.id, v)}
-                  />
-                )
-              ))}
+              {chat.messages.map((m, i) => renderMessage(m, i))}
             </AnimatePresence>
           </div>
         )}
@@ -884,14 +1171,30 @@ export default function ChatPanel() {
             </motion.div>
           )}
         </AnimatePresence>
-        <ChatInput onSend={send} disabled={busy} stop={stop} busy={busy} webSearch={webSearch} onToggleWebSearch={() => setWebSearch((v) => !v)} />
+        <ChatInput onSend={send} disabled={busy} stop={stop} busy={busy} webSearch={webSearch} onToggleWebSearch={() => setWebSearch((v) => !v)} contextUsed={contextUsed} contextSize={contextSize} />
       </div>
     </div>
   );
 }
 
-function NoKeyBar({ onOpen }) {
+// Hint shown in an empty image-generation chat — the model must be an image
+// model, so set expectations before the first failed request does it harshly.
+function ImageEmptyHint() {
   return (
+    <div className="h-full flex flex-col items-center justify-center gap-2 px-6 text-center">
+      <span className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: "color-mix(in srgb, var(--cb-accent) 14%, transparent)" }}>
+        <ImageIcon size={22} style={{ color: "var(--cb-accent)" }} />
+      </span>
+      <p className="text-sm font-medium">Describe the image to generate</p>
+      <p className="text-xs max-w-md" style={{ color: "var(--cb-muted)" }}>
+        Uses the selected model via <code>/images/generations</code>. Pick an image model
+        (DALL·E 3, GPT Image 1) from the model selector first — chat models can&apos;t draw.
+      </p>
+    </div>
+  );
+}
+
+function NoKeyBar({ onOpen }) {  return (
     <motion.div
       initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
       className="px-4 py-2 text-xs flex items-center justify-between gap-3"

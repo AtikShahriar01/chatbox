@@ -10,10 +10,12 @@
 // /api/chat route forwards raw upstream bytes for the OpenAI-compatible
 // family. For native adapters (Anthropic, Google, Cohere), the route
 // translates the upstream SSE into OpenAI-style deltas on the wire so
-// the browser code stays simple.
+// the browser code stays simple. Non-streaming calls go through
+// ./translate.js instead (native JSON → OpenAI JSON).
 
 export * from "./openai";
 export * from "./anthropic";
 export * from "./google";
 export * from "./ollama";
 export * from "./cohere";
+export * from "./translate";

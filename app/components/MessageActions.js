@@ -2,10 +2,10 @@
 
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Copy, Check, RotateCcw, Edit2, ThumbsUp, ThumbsDown, MoreHorizontal, ClipboardCopy, Code2 } from "lucide-react";
+import { Copy, Check, RotateCcw, Edit2, ThumbsUp, ThumbsDown, MoreHorizontal, ClipboardCopy, Code2, Bookmark } from "lucide-react";
 import { useStore } from "@/lib/store";
 
-export default function MessageActions({ message, onRegenerate, onEdit, onFeedback }) {
+export default function MessageActions({ message, chatId, onRegenerate, onEdit, onFeedback }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copiedMd, setCopiedMd] = useState(false);
@@ -13,6 +13,8 @@ export default function MessageActions({ message, onRegenerate, onEdit, onFeedba
   const [feedback, setFeedback] = useState(message.feedback || null);
   const ref = useRef(null);
   const pushClip = useStore((s) => s.pushClip);
+  const toggleBookmark = useStore((s) => s.toggleBookmark);
+  const pushToast = useStore((s) => s.pushToast);
 
   useEffect(() => {
     if (!open) return;
@@ -116,6 +118,16 @@ export default function MessageActions({ message, onRegenerate, onEdit, onFeedba
           >
             <MenuItem icon={ClipboardCopy} label="Copy as Markdown" onClick={() => copy(message.content || "", "md")} />
             <MenuItem icon={Code2} label="Copy code blocks" onClick={() => copy(extractCode(message.content || ""), "code")} />
+            {chatId && (
+              <MenuItem
+                icon={Bookmark}
+                label={message.bookmarked ? "Remove bookmark" : "Bookmark message"}
+                onClick={() => {
+                  toggleBookmark(chatId, message.id);
+                  pushToast({ type: "info", message: message.bookmarked ? "Bookmark removed." : "Message bookmarked." });
+                }}
+              />
+            )}
             {isUser && onEdit && <MenuItem icon={Edit2} label="Edit & resend" onClick={onEdit} />}
             {!isUser && onRegenerate && <MenuItem icon={RotateCcw} label="Regenerate response" onClick={onRegenerate} />}
           </motion.div>

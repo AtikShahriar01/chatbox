@@ -2,7 +2,9 @@
 
 // Terminal (master §16 / UI spec §10) — real bridge shell sessions rendered in
 // xterm.js. Output streams over SSE (/api/pc/stream → bridge /stream/:id).
-// Client-side line editing (no PTY): typed chars echo locally, Enter submits.
+// PTY mode (bridge /pty/*, real ConPTY): raw keystrokes go straight to the
+// shell — arrow keys, history and colors work like a desktop terminal.
+// Line mode fallback (bridge /term/*): typed chars echo locally, Enter submits.
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Plus, X, Trash2, Square } from "lucide-react";
@@ -21,6 +23,14 @@ export default function TerminalPane({ workspace }) {
   const esRef = useRef(null);
 
   const createSession = useCallback(async () => {
+    // PTY first (real terminal semantics); line-mode is the fallback when the
+    // bridge has no node-pty installed.
+    const pr = await pc("/pty/create", { cwd: workspace || undefined, shell: shellKind });
+    if (pr?.ok && pr.pty) {
+      addTerminal(pr.id, `${pr.shell === "powershell" ? "PTY PS" : "PTY"} ${pr.id.slice(-4)}`);
+      setActiveId(pr.id);
+      return pr.id;
+    }
     const r = await pc("/term/create", { cwd: workspace || undefined, shell: shellKind });
     if (r?.ok) {
       addTerminal(r.id, `${r.shell === "powershell" ? "PS" : "Shell"} ${r.id.slice(-4)}`);
@@ -76,8 +86,19 @@ export default function TerminalPane({ workspace }) {
       term.loadAddon(fit);
       term.open(container);
       try { fit.fit(); } catch {}
-      xrefs.current[activeId] = { term, fit, container, lineBuf: "" };
+      const isPty = /^PTY/.test(terminals.find((t) => t.id === activeId)?.label || "");
+      xrefs.current[activeId] = { term, fit, container, lineBuf: "", pty: isPty };
 
+      if (isPty) {
+        // PTY: raw keystrokes stream straight to the shell (the shell does its
+        // own echo/line editing); resize keeps the ConPTY grid in sync.
+        term.onData((data) => {
+          pc("/pty/write", { id: activeId, input: data });
+        });
+        term.onResize(({ cols, rows }) => {
+          pc("/pty/resize", { id: activeId, cols, rows });
+        });
+      } else {
       term.onData((data) => {
         const x = xrefs.current[activeId];
         if (!x) return;
@@ -97,6 +118,7 @@ export default function TerminalPane({ workspace }) {
           if (x.lineBuf.length) { x.lineBuf = x.lineBuf.slice(0, -1); term.write("\b \b"); }
         } else if (data >= " ") { x.lineBuf += data; term.write(data); }
       });
+      }
 
       // stream bridge output — kept on the session entry so killSession can
       // close it (an unclosed EventSource leaks one connection per terminal;
@@ -111,17 +133,25 @@ export default function TerminalPane({ workspace }) {
       xrefs.current[activeId].es = es;
       esRef.current = es;
 
-      // seed backlog + prompt
-      pc("/term/output", { id: activeId, since: 0 }).then((r) => {
-        if (r?.ok && r.new) writeOut(activeId, r.new);
-        prompt(activeId);
-      });
+      if (isPty) {
+        // seed backlog only — the shell paints its own prompt
+        pc("/pty/output", { id: activeId, since: 0 }).then((r) => {
+          if (r?.ok && r.new) writeOut(activeId, r.new);
+        });
+      } else {
+        // seed backlog + prompt
+        pc("/term/output", { id: activeId, since: 0 }).then((r) => {
+          if (r?.ok && r.new) writeOut(activeId, r.new);
+          prompt(activeId);
+        });
+      }
     })();
     return () => { disposed = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- terminals read for the label only
   }, [activeId, workspace]);
 
   const killSession = async (id) => {
-    await pc("/term/kill", { id });
+    await pc(xrefs.current[id]?.pty ? "/pty/kill" : "/term/kill", { id });
     try { xrefs.current[id]?.es?.close(); } catch {}
     try { xrefs.current[id]?.term?.dispose(); } catch {}
     delete xrefs.current[id];
@@ -132,7 +162,12 @@ export default function TerminalPane({ workspace }) {
   };
 
   const interrupt = async () => {
-    if (activeId) await pc("/term/write", { id: activeId, input: String.fromCharCode(3) });
+    if (!activeId) return;
+    if (xrefs.current[activeId]?.pty) {
+      await pc("/pty/write", { id: activeId, input: String.fromCharCode(3) });
+    } else {
+      await pc("/term/write", { id: activeId, input: String.fromCharCode(3) });
+    }
   };
 
   return (

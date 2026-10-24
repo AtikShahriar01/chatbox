@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="#-quick-installation--run">
-    <img src="https://img.shields.io/badge/Release-v1.1-blue.svg?style=for-the-badge" alt="Release">
+    <img src="https://img.shields.io/badge/Release-v1.2-blue.svg?style=for-the-badge" alt="Release">
   </a>
   <a href="https://nextjs.org/">
     <img src="https://img.shields.io/badge/Next.js-14-black.svg?style=for-the-badge&logo=next.js&logoColor=white" alt="Next.js">
@@ -105,9 +105,25 @@ A visual tour of the premium dark-themed interfaces built into Chatbox:
 
 ### 💬 Chat & Models
 *   **Bring Your Own Key (BYOK):** OpenAI, Claude, Google Gemini, DeepSeek, Groq, Mistral, xAI, Cohere, OpenRouter — and local **Ollama / LM Studio** with no key at all.
-*   **Smart Provider Detection:** The app auto-detects the provider protocol from your base URL and streams replies correctly (OpenAI / Anthropic / Google / Cohere native).
+*   **Smart Provider Detection:** The app auto-detects the provider protocol from your base URL and streams replies correctly (OpenAI / Anthropic / Google / Cohere native) — in both streaming **and** non-streaming modes, so the agent engine works on every provider.
 *   **Copilots & Personas:** Switch system-prompt personalities (Coder, Writer, Translator, Analyst) per chat.
-*   **Web Search Mode:** Ground answers in live results with inline citations.
+*   **Web Search Mode:** Ground answers in live results with inline citations — 3-engine fallback chain (DuckDuckGo HTML → Lite → Wikipedia) with a 1-hour result cache.
+*   **Message Branching:** Every regenerate is kept as a browsable variant — flip between reply versions with ‹ 2/3 › switchers.
+*   **Context Compaction:** Long conversations are auto-summarized instead of silently forgotten, so the model keeps the thread even after hundreds of messages.
+*   **Auto-Memory:** Durable facts about you and your project are learned while you chat and injected into future prompts (fully inspectable/editable in Settings → Memory).
+*   **Slash Commands & Prompt Library:** `/image`, `/new`, `/search`, `/stop` — plus your own saved prompts, one keystroke away.
+*   **Image Generation & Vision:** Attach images, generate with DALL·E 3 / GPT Image 1, and let the agent *see* screenshots and workspace image files (vision models).
+*   **Document Chat (RAG-lite):** Attach PDF/TXT/CSV/code files — they are chunked, embedded via your own provider and retrieved per-question. Images live in IndexedDB, so localStorage never fills up.
+
+### 🤖 Intelligence & Automation (v1.2)
+*   **Parallel Agent Teams:** The CEO → workers orchestration fans out 2–4 agents at once (configurable; sequential mode for strict free tiers).
+*   **Autonomous Coding Agent:** 40+ tools with a mandatory live TODO checklist, checkpoint-before-edit, and a self-verification gate that refuses "done" without running the code.
+*   **Always-On Scheduler:** Time-based automations run by the *local bridge itself* — even with the browser closed — with results collected in the Console dashboard.
+*   **Background Task Queue:** Queue multiple goals in the IDE agent panel; they auto-start when the agent is idle and notify you when finished.
+*   **Human-in-the-Loop:** Plan-approval gate before agents start, permission approvals for risky ops, and an `ask_user` tool — the agent asks *you* questions mid-task.
+*   **Skills System:** Your own stack rules and workflows injected into every agent prompt (Settings → Skills).
+*   **Agent Web & Screen Access:** `read_url` fetches any public page (SSRF-guarded), `screenshot` captures and *looks* at the screen, `show_html` renders agent-written HTML in a sandboxed preview.
+*   **Daily Disk Backups:** The full store is snapshotted to `agent-bridge/backups/` (last 7 kept) — browser data loss no longer means history loss.
 
 ### 🧑‍ Integrated IDE
 <details>
@@ -115,7 +131,7 @@ A visual tour of the premium dark-themed interfaces built into Chatbox:
 <br>
 
 *   **Monaco Editor** (the VS Code engine) with syntax highlighting, local assets, and full offline support.
-*   **Live Terminal** — real shell sessions streamed over SSE, CMD or PowerShell.
+*   **Live PTY Terminal** — real ConPTY shell sessions (arrow keys, history, colors all work) streamed over SSE, CMD or PowerShell, with a line-mode fallback.
 *   **Git Panel** — status, diff, stage, commit, branches, and rollback checkpoints.
 *   **File Explorer** — create/rename/delete files inside your workspace with confirmation.
 </details>

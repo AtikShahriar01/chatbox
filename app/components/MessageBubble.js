@@ -2,19 +2,34 @@
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 import rehypeHighlight from "rehype-highlight";
-import rehypeSanitize from "rehype-sanitize";
-import { Bot, User, Brain, Square, Loader2, Volume2, VolumeX, FileCode, Copy, Check, CheckCircle2, XCircle, CircleDashed } from "lucide-react";
+import rehypeKatex from "rehype-katex";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
+import { Bot, User, Brain, Square, Loader2, Volume2, VolumeX, FileCode, FileText, Copy, Check, CheckCircle2, XCircle, CircleDashed, Bookmark, ChevronLeft, ChevronRight } from "lucide-react";
 import { motion } from "motion/react";
-import { useRef, useState, memo } from "react";
+import { useEffect, useRef, useState, memo } from "react";
 import MessageActions from "./MessageActions";
 import TokenBadge from "./TokenBadge";
 import OrchestrationCard from "./OrchestrationCard";
 import ReadAloud from "./ReadAloud";
+import MermaidBlock from "./chat/MermaidBlock";
 import { useStore } from "@/lib/store";
+import { getImage } from "@/lib/image-store";
 
-const remarkPlugins = [remarkGfm];
-const rehypePlugins = [rehypeSanitize, rehypeHighlight];
+const remarkPlugins = [remarkGfm, remarkMath];
+// Sanitize FIRST (model output is untrusted), then highlight, then KaTeX —
+// the math HTML KaTeX emits is never stripped because it comes after
+// sanitize. className must survive sanitize or remark-math's math markers
+// disappear before rehype-katex can find them.
+const sanitizeSchema = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    "*": [...(defaultSchema.attributes?.["*"] || []), "className"],
+  },
+};
+const rehypePlugins = [[rehypeSanitize, sanitizeSchema], rehypeHighlight, rehypeKatex];
 
 // Perf: during streaming ChatPanel re-renders on every 150ms flush. Without
 // this memo EVERY message bubble re-parses its markdown + re-runs highlight.js
@@ -30,10 +45,15 @@ const MarkdownBody = memo(function MarkdownBody({ content }) {
 });
 
 // One-click Copy button on every fenced code block (directive §8 safe: the
-// button only reads the rendered text — never injects anything).
+// button only reads the rendered text — never injects anything). ```mermaid
+// fences render as diagrams instead.
 function CodeBlockPre({ children }) {
   const preRef = useRef(null);
   const [copied, setCopied] = useState(false);
+  const codeEl = Array.isArray(children) ? children[0] : children;
+  const cls = codeEl?.props?.className || "";
+  const lang = /language-([\w-]+)/.exec(cls)?.[1] || "";
+  if (lang === "mermaid") return <MermaidBlock chart={childText(codeEl?.props?.children)} />;
   const onCopy = async () => {
     const text = preRef.current?.innerText || "";
     try {
@@ -58,7 +78,16 @@ function CodeBlockPre({ children }) {
   );
 }
 
-export default function MessageBubble({ message, chatId, onEditCode, onInsertChat, onPlanDecision, onRegenerate, onEdit, onFeedback, isLast, apiModel, modelPricing }) {
+// Pull the plain text out of React children (strings, elements, arrays).
+function childText(node) {
+  if (node == null) return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(childText).join("");
+  if (node?.props?.children) return childText(node.props.children);
+  return "";
+}
+
+export default function MessageBubble({ message, chatId, onEditCode, onInsertChat, onPlanDecision, onRegenerate, onEdit, onFeedback, onVariant, isLast, apiModel, modelPricing }) {
   const isUser = message.role === "user";
   const hasOrch = !!message.orchestration;
   const hasThinking = message.thinking && !message.content && !hasOrch;
@@ -97,7 +126,44 @@ export default function MessageBubble({ message, chatId, onEditCode, onInsertCha
               <Square size={8} fill="currentColor" /> stopped
             </span>
           )}
+          {/* Branching: ‹ x/n › switches between regenerated reply versions */}
+          {message.variants?.length > 1 && onVariant && (
+            <span className="text-[10px] normal-case font-normal inline-flex items-center gap-0.5 px-1 py-0.5 rounded" style={{ background: "var(--cb-border)" }}>
+              <button onClick={() => onVariant(-1)} className="cb-focus px-0.5 rounded hover:opacity-100 opacity-70" aria-label="Previous version">
+                <ChevronLeft size={10} />
+              </button>
+              <span className="font-mono">{(message.variantIndex ?? message.variants.length - 1) + 1}/{message.variants.length}</span>
+              <button onClick={() => onVariant(1)} className="cb-focus px-0.5 rounded hover:opacity-100 opacity-70" aria-label="Next version">
+                <ChevronRight size={10} />
+              </button>
+            </span>
+          )}
+          {message.bookmarked && (
+            <span className="text-[10px] normal-case font-normal px-1.5 py-0.5 rounded inline-flex items-center gap-1" style={{ background: "color-mix(in srgb, var(--cb-accent) 14%, transparent)", color: "var(--cb-accent)" }}>
+              <Bookmark size={8} fill="currentColor" /> bookmarked
+            </span>
+          )}
         </div>
+
+        {/* Attached documents (document chat / RAG-lite) */}
+        {message.attachments?.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {message.attachments.map((d, i) => (
+              <span key={i} className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px]" style={{ background: "color-mix(in srgb, var(--cb-accent) 10%, transparent)", color: "var(--cb-accent)" }} title={`${d.chunks} chunks indexed for retrieval`}>
+                <FileText size={10} /> {d.name} · {d.chunks}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* Generated / attached images (user uploads + image-generation results) */}
+        {message.images?.length > 0 && (
+          <div className={`mb-2.5 grid gap-2 ${message.images.length > 1 ? "grid-cols-2" : ""}`}>
+            {message.images.map((src, i) => (
+              <SmartImage key={i} src={src} alt={message.altText || `image ${i + 1}`} />
+            ))}
+          </div>
+        )}
 
         {/* Agent mission-control card — live status while the coding agent works */}
         {message.agentRun && (
@@ -266,6 +332,7 @@ export default function MessageBubble({ message, chatId, onEditCode, onInsertCha
           <div className={`mt-2 flex items-center gap-1 transition-opacity ${isUser ? "opacity-0 group-hover:opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
             <MessageActions
               message={message}
+              chatId={chatId}
               onRegenerate={onRegenerate}
               onEdit={onEdit}
               onFeedback={onFeedback}
@@ -276,5 +343,49 @@ export default function MessageBubble({ message, chatId, onEditCode, onInsertCha
         )}
       </div>
     </motion.div>
+  );
+}
+
+// Resolves "idb:<id>" references (IndexedDB image store) to data URLs and
+// renders the image. Inline data URLs pass straight through.
+function SmartImage({ src, alt }) {
+  const isRef = typeof src === "string" && src.startsWith("idb:");
+  const [resolved, setResolved] = useState(isRef ? null : src);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    if (typeof src === "string" && src.startsWith("idb:")) {
+      getImage(src).then((d) => { if (alive) setResolved(d); });
+    } else {
+      setResolved(src);
+    }
+    return () => { alive = false; };
+  }, [src]);
+  if (!resolved) {
+    return (
+      <figure className="flex h-40 w-full items-center justify-center rounded-xl text-[11px]"
+        style={{ background: "var(--cb-bg)", border: "1px dashed var(--cb-border)", color: "var(--cb-muted)" }}>
+        image not found (IndexedDB cleared?)
+      </figure>
+    );
+  }
+  return (
+    <figure className="overflow-hidden rounded-xl" style={{ border: "1px solid var(--cb-border)" }}>
+      {/* eslint-disable-next-line @next/next/no-img-element -- data URLs from the local proxy; next/image adds nothing here */}
+      <img
+        src={resolved}
+        alt={alt}
+        className="block h-auto w-full cursor-zoom-in"
+        style={{ maxHeight: 380, objectFit: "contain", background: "var(--cb-bg)" }}
+        onClick={() => setOpen(true)}
+        loading="lazy"
+      />
+      {open && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/80 p-6" onClick={() => setOpen(false)} role="dialog" aria-label={alt}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={resolved} alt={alt} className="max-h-full max-w-full rounded-xl" />
+        </div>
+      )}
+    </figure>
   );
 }

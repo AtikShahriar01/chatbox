@@ -35,13 +35,25 @@ const NAV = [
 export default function PlatformShell() {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [section, setSection] = useState("dashboard");
+  const [section, setSection] = useState(() => {
+    // Deep-link section set by ViewRedirect (/console/tasks → "tasks"),
+    // validated against the nav so a bad URL falls back to the dashboard.
+    const s = useUi.getState().consoleSection;
+    return NAV.some((n) => n.key === s) ? s : "dashboard";
+  });
   const [agent, setAgent] = useState({ connected: false, workspace: "", mode: "ask" });
   const [fails, setFails] = useState(0);
   const [device, setDevice] = useState(null);
   const tasks = useIde((s) => s.tasks);
   const pending = useIde((s) => s.pendingApprovals);
   const runningTask = tasks.some((t) => ["running", "planning", "testing", "fixing"].includes(t.status));
+
+  // Keep the URL in sync so the active section is shareable/reloadable.
+  const gotoSection = (key) => {
+    setSection(key);
+    useUi.getState().setConsoleSection(key);
+    try { window.history.replaceState(null, "", `/console/${key}`); } catch {}
+  };
 
   useEffect(() => {
     let alive = true;
@@ -68,7 +80,7 @@ export default function PlatformShell() {
       {NAV.map((n) => {
         const active = section === n.key;
         return (
-          <button key={n.key} onClick={() => { setSection(n.key); onNavigate?.(); }} title={n.label}
+          <button key={n.key} onClick={() => { gotoSection(n.key); onNavigate?.(); }} title={n.label}
             className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[12.5px] font-medium ide-transition ${active ? "" : "hover:bg-white/[0.06]"}`}
             style={active ? { background: "color-mix(in srgb, var(--accent) 16%, transparent)", color: "var(--accent)" } : { color: "var(--txt-dim)" }}
             aria-current={active ? "page" : undefined}>

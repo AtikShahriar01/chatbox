@@ -9,10 +9,11 @@ import { motion, AnimatePresence } from "motion/react";
 import {
   Play, Pause, Square, RotateCcw, Loader2, CheckCircle2, XCircle, CircleDashed,
   Terminal as TerminalIcon, ShieldCheck, ShieldAlert, Lock, Unlock, ShieldQuestion,
-  ChevronDown, ChevronRight, MonitorSmartphone,
+  ChevronDown, ChevronRight, MonitorSmartphone, ListPlus,
 } from "lucide-react";
 import { pc } from "@/lib/pc";
 import { useIde, newId, TASK_STATUS } from "@/lib/ide-store";
+import { notifyDone } from "@/lib/notify";
 import { useStore } from "@/lib/store";
 import ChangesPanel from "./ChangesPanel";
 
@@ -122,11 +123,20 @@ export default function AgentPanel({ workspace, agentRef, onRunCommand }) {
     setPending([]);
   };
 
-  const run = async () => {
-    if (!goal.trim() || runningId) return;
+  // Run one goal through the agent engine. runningId is set SYNCHRONOUSLY so
+  // the queue auto-runner below can never double-start in the same commit.
+  const runGoal = async (goalText) => {
+    const g = String(goalText || "").trim();
+    if (!g || runningId) return;
+    const localProvider = ["11434", "ollama", "1234", "lm-studio", "localhost", "127.0.0.1"].some((sv) => (store.apiBaseUrl || "").includes(sv));
+    if (!store.apiKey && !localProvider) {
+      pushActivity({ actor: "user", action: "no API key", resource: "settings", result: "configure a provider in Settings first", risk: "low" });
+      return;
+    }
+    setRunningId(newId());
     const cfg = {
       apiBaseUrl: store.apiBaseUrl, apiKey: store.apiKey, apiModel: store.apiModel,
-      workspace: bridge.workspace || workspace, goal: goal.trim(),
+      workspace: bridge.workspace || workspace, goal: g,
       onUsage: (modelId, usage) => {
         try {
           store.recordUsage(modelId, {
@@ -135,24 +145,37 @@ export default function AgentPanel({ workspace, agentRef, onRunCommand }) {
         } catch {}
       },
     };
-    const localProvider = ["11434", "ollama", "1234", "lm-studio", "localhost", "127.0.0.1"].some((s) => (cfg.apiBaseUrl || "").includes(s));
-    if (!cfg.apiKey && !localProvider) {
-      pushActivity({ actor: "user", action: "no API key", resource: "settings", result: "configure a provider in Settings first", risk: "low" });
-      return;
-    }
-    const { createAgent } = await import("@/lib/agent-engine");
-    const agent = createAgent();
-    agentRefLocal.current = agent;
-    setRunningId(newId());
-    setGoal("");
     setBottomTab("output");
-    await agent.run(cfg, (ev) => {
-      if (ev.type === "tool" && /dev server|start_process/.test(ev.tool || "")) refreshTree();
-    }).finally(() => {
+    try {
+      const { createAgent } = await import("@/lib/agent-engine");
+      const agent = createAgent();
+      agentRefLocal.current = agent;
+      await agent.run(cfg, (ev) => {
+        if (ev.type === "tool" && /dev server|start_process/.test(ev.tool || "")) refreshTree();
+      });
+    } finally {
       setRunningId(null); setPaused(false);
       refreshTree();
-    });
+      // finished while you're in another tab/view → unread badge + notification
+      notifyDone(`Agent task: ${g.slice(0, 80)}`);
+    }
   };
+
+  const run = async () => {
+    if (!goal.trim() || runningId) return;
+    const g = goal.trim();
+    setGoal("");
+    await runGoal(g);
+  };
+
+  // Background task queue (ZCode-style): queued goals auto-start one at a
+  // time whenever the agent is idle. queue lives in ide-store (persisted).
+  useEffect(() => {
+    if (runningId || !store.taskQueue?.length) return;
+    const head = store.dequeueTask();
+    if (head) runGoal(head);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  });
 
   const stop = () => { agentRefLocal.current?.stop?.(); setRunningId(null); setPaused(false); };
   const pause = () => {
@@ -299,6 +322,14 @@ export default function AgentPanel({ workspace, agentRef, onRunCommand }) {
                 <button onClick={run} className="flex items-center gap-1 rounded-lg bg-[var(--accent)] px-3 py-1 text-[11.5px] font-medium text-black hover:opacity-90">
                   <Play size={11} /> Run task
                 </button>
+                <button
+                  onClick={() => { if (goal.trim()) { store.enqueueTask(goal.trim()); setGoal(""); } }}
+                  disabled={!goal.trim()}
+                  className="flex items-center gap-1 rounded-lg border border-white/10 px-2.5 py-1 text-[11.5px] text-[var(--txt-dim)] hover:bg-white/5 disabled:opacity-40"
+                  title="Add to the background queue — runs automatically when the agent is idle"
+                >
+                  <ListPlus size={11} /> Queue
+                </button>
                 <span className="ml-auto text-[10px] text-[var(--txt-dim)]">{store.apiModel || "configure model in Settings"}</span>
               </>
             )}
@@ -308,6 +339,26 @@ export default function AgentPanel({ workspace, agentRef, onRunCommand }) {
 
       {/* task list */}
       <div className="min-h-0 flex-1 overflow-auto p-3">
+        {(store.taskQueue?.length || 0) > 0 && (
+          <div className="mb-3 rounded-xl border border-white/10 bg-white/[0.03] p-2.5">
+            <p className="mb-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-[var(--txt-dim)]">
+              Queue ({store.taskQueue.length}) — auto-runs when idle
+            </p>
+            {store.taskQueue.map((qg, i) => (
+              <div key={i} className="flex items-center gap-2 py-0.5 text-[12px]">
+                <span className="shrink-0 text-[var(--txt-dim)]">{i + 1}.</span>
+                <span className="min-w-0 flex-1 truncate" title={qg}>{qg}</span>
+                <button
+                  onClick={() => useIde.setState((st) => ({ taskQueue: st.taskQueue.filter((_, idx) => idx !== i) }))}
+                  className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-[var(--txt-dim)] hover:bg-white/10"
+                  title="Remove from queue"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         {!tasks.length && (
           <p className="px-1 text-[12px] leading-relaxed text-[var(--txt-dim)]">
             No agent tasks yet. The agent can inspect the project, edit files, run commands, use git and fix errors — every step shows up here in real time.

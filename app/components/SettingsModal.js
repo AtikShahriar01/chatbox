@@ -1,6 +1,8 @@
 "use client";
 
 import { useStore, PROVIDER_LABELS, detectProvider } from "@/lib/store";
+import { getImage, migrateStoreImages } from "@/lib/image-store";
+import { backupNow } from "@/lib/scheduler";
 import { X, Check, Database, Bot, Keyboard, Info, RefreshCw, Download, Upload, Sparkles, Globe } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { useEffect, useState } from "react";
@@ -17,6 +19,8 @@ const SECTIONS = [
   { key: "models", label: "Models", icon: null },
   { key: "copilots", label: "Copilots", icon: null },
   { key: "memory", label: "Memory", icon: null },
+  { key: "skills", label: "Skills", icon: null },
+  { key: "scheduler", label: "Scheduler", icon: null },
   { key: "pc", label: "PC Access", icon: null },
   { key: "shortcuts", label: "Shortcuts", icon: null },
   { key: "data", label: "Data", icon: null },
@@ -48,6 +52,9 @@ export default function SettingsModal() {
   const apiBaseUrl = useStore((s) => s.apiBaseUrl);
   const apiKey = useStore((s) => s.apiKey);
   const apiModel = useStore((s) => s.apiModel);
+  const embeddingModel = useStore((s) => s.embeddingModel);
+  const agentConcurrency = useStore((s) => s.agentConcurrency);
+  const autoMemory = useStore((s) => s.autoMemory);
   const setSetting = useStore((s) => s.setSetting);
   const sessionKeyOnly = useStore((s) => s.sessionKeyOnly);
   const providers = useStore((s) => s.providers);
@@ -98,14 +105,34 @@ export default function SettingsModal() {
     }
   };
 
-  const exportData = () => {
+  const exportData = async () => {
+    const st = useStore.getState();
     const data = {
       version: 3,
       exportedAt: new Date().toISOString(),
       settings: { theme, customColor, mode, language, fontSize, systemPrompt, maxContext, temperature, apiBaseUrl, apiModel, apiKey: apiKey ? "***" : "" },
       chats,
       copilots,
+      // Everything else worth keeping across devices — key stays masked above.
+      memory: st.memory,
+      promptLibrary: st.promptLibrary,
+      customModels: st.customModels,
+      favorites: st.favorites,
+      chatDrafts: st.chatDrafts,
+      embeddingModel: st.embeddingModel,
     };
+    // Inline the IndexedDB image blobs so the export is self-contained.
+    const imageMap = {};
+    for (const c of chats) {
+      for (const m of c.messages || []) {
+        for (const im of m.images || []) {
+          if (typeof im === "string" && im.startsWith("idb:") && !imageMap[im]) {
+            imageMap[im] = await getImage(im);
+          }
+        }
+      }
+    }
+    data.images = imageMap;
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -129,7 +156,8 @@ export default function SettingsModal() {
             setSetting(k, v);
           }
         }
-        pushToast({ type: "success", message: "Imported successfully." });
+        migrateStoreImages(useStore);
+      pushToast({ type: "success", message: "Imported successfully." });
       } catch (e) {
         pushToast({ type: "error", message: "Import failed: " + String(e?.message || e) });
       }
@@ -218,7 +246,7 @@ export default function SettingsModal() {
                   {tab === "general" && (
                     <div className="space-y-6">
                       <h3 className="text-base font-semibold tracking-tight">Display Settings</h3>
-                      <Row label="Language">
+                      <Row label="Reply & voice language">
                         <select value={language} onChange={(e) => setSetting("language", e.target.value)} className="cb-focus px-3 py-1.5 rounded text-sm w-64" style={inputStyle}>
                           <option value="en">English</option>
                           <option value="bn">বাংলা (Bengali)</option>
@@ -227,6 +255,9 @@ export default function SettingsModal() {
                           <option value="fr">Français</option>
                         </select>
                       </Row>
+                      <p className="text-[11px] -mt-3" style={{ color: "var(--cb-muted)" }}>
+                        Controls the AI&apos;s reply language (per-chat override in the input bar), voice input and read-aloud. App UI text is English/বাংলা.
+                      </p>
                       <Row label="Theme">
                         <select value={mode} onChange={(e) => applyTheme("mode", e.target.value)} className="cb-focus px-3 py-1.5 rounded text-sm w-64" style={inputStyle}>
                           <option value="system">Follow System</option>
@@ -294,6 +325,20 @@ export default function SettingsModal() {
                         <input type="range" min="0" max="2" step="0.1" value={temperature} onChange={(e) => setSetting("temperature", parseFloat(e.target.value))} className="w-64" />
                         <span className="text-xs ml-2" style={{ color: "var(--cb-muted)" }}>{temperature.toFixed(1)}</span>
                       </Row>
+                      <Row label="Parallel agents">
+                        <select value={agentConcurrency} onChange={(e) => setSetting("agentConcurrency", parseInt(e.target.value))} className="cb-focus px-3 py-1.5 rounded text-sm w-64" style={inputStyle}>
+                          <option value={1}>1 — sequential (strict free tiers)</option>
+                          <option value={2}>2 — parallel</option>
+                          <option value={3}>3 — parallel</option>
+                          <option value={4}>4 — parallel (fastest)</option>
+                        </select>
+                      </Row>
+                      <Row label="">
+                        <label className="cb-focus flex items-center gap-2 text-xs cursor-pointer select-none" style={{ color: "var(--cb-muted)" }}>
+                          <input type="checkbox" checked={!!autoMemory} onChange={(e) => setSetting("autoMemory", e.target.checked)} />
+                          🧠 Auto-memory — learn durable facts about you/project while chatting
+                        </label>
+                      </Row>
                     </div>
                   )}
 
@@ -328,6 +373,12 @@ export default function SettingsModal() {
                       <Row label="Model">
                         <input value={apiModel} onChange={(e) => setSetting("apiModel", e.target.value)} placeholder="openai/gpt-4o-mini" className="cb-focus w-full max-w-xl px-3 py-2 rounded text-sm transition-colors" style={inputStyle} />
                       </Row>
+                      <Row label="Embedding model">
+                        <input value={embeddingModel} onChange={(e) => setSetting("embeddingModel", e.target.value)} placeholder="text-embedding-3-small (used for document chat)" className="cb-focus w-full max-w-xl px-3 py-2 rounded text-sm transition-colors" style={inputStyle} />
+                      </Row>
+                      <p className="text-[11px] -mt-3" style={{ color: "var(--cb-muted)" }}>
+                        For document chat (attach PDF/text files): the provider must expose an OpenAI-compatible <code>/embeddings</code> endpoint.
+                      </p>
                       <Row label="Default / Fallback">
                         <div className="flex flex-wrap items-center gap-2 text-xs" style={{ color: "var(--cb-muted)" }}>
                           <button onClick={() => setDefaultModel(apiModel)} className="cb-focus px-2 py-1 rounded border" style={{ borderColor: "var(--cb-border)" }}>★ “{apiModel}” = Default</button>
@@ -429,6 +480,26 @@ export default function SettingsModal() {
                     </div>
                   )}
 
+                  {tab === "skills" && (
+                    <div className="space-y-5">
+                      <h3 className="text-base font-semibold tracking-tight">Agent Skills</h3>
+                      <p className="text-xs" style={{ color: "var(--cb-muted)" }}>
+                        Custom workflows and conventions injected into the agent team&apos;s CEO plan and the autonomous coding agent. Example: &quot;Always use Tailwind + Next.js App Router; put API routes under app/api.&quot;
+                      </p>
+                      <SkillsManager />
+                    </div>
+                  )}
+
+                  {tab === "scheduler" && (
+                    <div className="space-y-5">
+                      <h3 className="text-base font-semibold tracking-tight">Scheduler</h3>
+                      <p className="text-xs" style={{ color: "var(--cb-muted)" }}>
+                        Time-based automations. Runs start a fresh chat with your prompt while the app is open — results notify you when finished.
+                      </p>
+                      <SchedulerManager />
+                    </div>
+                  )}
+
                   {tab === "pc" && (
                     <PcAgentPanel />
                   )}
@@ -516,6 +587,15 @@ export default function SettingsModal() {
                           <input type="file" accept="application/json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) importData(f); e.target.value = ""; }} />
                         </label>
                       </div>
+                      <div className="rounded-lg p-3 text-xs space-y-2" style={{ background: "var(--cb-surface)", border: "1px solid var(--cb-border)" }}>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">🗄️ Disk backup (via local bridge)</span>
+                          <BackupButton />
+                        </div>
+                        <p style={{ color: "var(--cb-muted)" }}>
+                          Daily automatic snapshot to <code>agent-bridge/backups/</code> (last 7 kept) — protects against browser data loss. Restore via Import by picking a backup file.
+                        </p>
+                      </div>
                     </div>
                   )}
 
@@ -536,7 +616,7 @@ export default function SettingsModal() {
                         <li>• 8+ built-in models, 12+ providers, custom model support</li>
                         <li>• Local-first storage — your data never leaves your browser</li>
                         <li>• Streaming responses with reasoning blocks, stop button, edit & resend</li>
-                        <li>• CMD-K command palette, branching, copilots, image upload</li>
+                        <li>• CMD-K command palette, copilots, image upload & image generation</li>
                         <li>• Open source, MIT licensed</li>
                       </ul>
                     </div>
@@ -587,3 +667,157 @@ function Shortcut({ k, v }) {
 }
 
 const inputStyle = { background: "var(--cb-surface)", border: "1px solid var(--cb-border)" };
+
+
+// ── Skills manager (Settings → Skills) ──────────────────────────────────────
+function SkillsManager() {
+  const skills = useStore((s) => s.skills);
+  const addSkill = useStore((s) => s.addSkill);
+  const updateSkill = useStore((s) => s.updateSkill);
+  const removeSkill = useStore((s) => s.removeSkill);
+  const [name, setName] = useState("");
+  const [prompt, setPrompt] = useState("");
+
+  const add = () => {
+    if (!name.trim() || !prompt.trim()) return;
+    addSkill({ name: name.trim(), prompt: prompt.trim() });
+    setName("");
+    setPrompt("");
+  };
+
+  return (
+    <div className="space-y-3">
+      {(skills || []).map((sk) => (
+        <div key={sk.id} className="rounded-lg border p-3" style={{ borderColor: "var(--cb-border)", background: "var(--cb-surface)" }}>
+          <div className="flex items-center gap-2">
+            <input type="checkbox" checked={!!sk.enabled} onChange={(e) => updateSkill(sk.id, { enabled: e.target.checked })} aria-label={`Enable ${sk.name}`} />
+            <span className="text-sm font-medium">{sk.name}</span>
+            <button onClick={() => removeSkill(sk.id)} className="cb-focus ml-auto text-[11px] hover:underline" style={{ color: "#ef4444" }}>Delete</button>
+          </div>
+          <textarea
+            value={sk.prompt}
+            onChange={(e) => updateSkill(sk.id, { prompt: e.target.value })}
+            rows={2}
+            className="cb-focus mt-2 w-full rounded p-2 text-xs outline-none resize-none"
+            style={{ background: "var(--cb-bg)", border: "1px solid var(--cb-border)", color: "var(--cb-text)" }}
+          />
+        </div>
+      ))}
+      <div className="rounded-lg border p-3" style={{ borderColor: "var(--cb-border)" }}>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Skill name (e.g. My stack rules)"
+          className="cb-focus w-full rounded px-3 py-2 text-sm outline-none mb-2"
+          style={{ background: "var(--cb-bg)", border: "1px solid var(--cb-border)", color: "var(--cb-text)" }}
+        />
+        <textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          rows={3}
+          placeholder="What should the agents always do / avoid? (injected into agent prompts)"
+          className="cb-focus w-full rounded px-3 py-2 text-xs outline-none resize-none mb-2"
+          style={{ background: "var(--cb-bg)", border: "1px solid var(--cb-border)", color: "var(--cb-text)" }}
+        />
+        <button
+          onClick={add}
+          disabled={!name.trim() || !prompt.trim()}
+          className="cb-focus px-3 py-1.5 rounded text-xs font-medium text-white disabled:opacity-40"
+          style={{ background: "var(--cb-accent)" }}
+        >
+          + Add skill
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Scheduler manager (Settings → Scheduler) ────────────────────────────────
+function SchedulerManager() {
+  const schedules = useStore((s) => s.schedules);
+  const addSchedule = useStore((s) => s.addSchedule);
+  const updateSchedule = useStore((s) => s.updateSchedule);
+  const removeSchedule = useStore((s) => s.removeSchedule);
+  const [prompt, setPrompt] = useState("");
+  const [kind, setKind] = useState("interval");
+  const [everyMinutes, setEveryMinutes] = useState(60);
+  const [dailyTime, setDailyTime] = useState("09:00");
+
+  const add = () => {
+    if (!prompt.trim()) return;
+    addSchedule({ prompt: prompt.trim(), kind, everyMinutes, dailyTime });
+    setPrompt("");
+  };
+
+  return (
+    <div className="space-y-3">
+      {(schedules || []).map((sc) => (
+        <div key={sc.id} className="flex items-center gap-2 rounded-lg border p-3" style={{ borderColor: "var(--cb-border)", background: "var(--cb-surface)" }}>
+          <input type="checkbox" checked={!!sc.enabled} onChange={(e) => updateSchedule(sc.id, { enabled: e.target.checked })} aria-label={`Enable schedule`} />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[12.5px]" title={sc.prompt}>{sc.prompt}</p>
+            <p className="text-[10.5px]" style={{ color: "var(--cb-muted)" }}>
+              {sc.kind === "daily" ? `daily at ${sc.dailyTime}` : `every ${sc.everyMinutes} min`}
+              {sc.nextRun ? ` · next: ${new Date(sc.nextRun).toLocaleTimeString()}` : ""}
+            </p>
+          </div>
+          <button onClick={() => removeSchedule(sc.id)} className="cb-focus text-[11px] hover:underline" style={{ color: "#ef4444" }}>Delete</button>
+        </div>
+      ))}
+      <div className="rounded-lg border p-3 space-y-2" style={{ borderColor: "var(--cb-border)" }}>
+        <textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          rows={2}
+          placeholder="Prompt to run automatically (e.g. 'Summarize today's todos and plan my day')"
+          className="cb-focus w-full rounded px-3 py-2 text-xs outline-none resize-none"
+          style={{ background: "var(--cb-bg)", border: "1px solid var(--cb-border)", color: "var(--cb-text)" }}
+        />
+        <div className="flex items-center gap-2 flex-wrap text-xs">
+          <select value={kind} onChange={(e) => setKind(e.target.value)} className="cb-focus px-2 py-1.5 rounded" style={inputStyle}>
+            <option value="interval">Every N minutes</option>
+            <option value="daily">Daily at time</option>
+          </select>
+          {kind === "interval" ? (
+            <input type="number" min="5" max="10080" value={everyMinutes} onChange={(e) => setEveryMinutes(parseInt(e.target.value) || 60)} className="cb-focus w-20 px-2 py-1.5 rounded" style={inputStyle} />
+          ) : (
+            <input type="time" value={dailyTime} onChange={(e) => setDailyTime(e.target.value)} className="cb-focus px-2 py-1.5 rounded" style={inputStyle} />
+          )}
+          <button
+            onClick={add}
+            disabled={!prompt.trim()}
+            className="cb-focus ml-auto px-3 py-1.5 rounded text-xs font-medium text-white disabled:opacity-40"
+            style={{ background: "var(--cb-accent)" }}
+          >
+            + Add schedule
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Disk backup button (Settings → Data) ────────────────────────────────────
+function BackupButton() {
+  const lastBackupAt = useStore((s) => s.lastBackupAt);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const run = async () => {
+    setBusy(true);
+    setMsg("");
+    const r = await backupNow();
+    setMsg(r.ok ? "saved ✓" : String(r.error || "failed").slice(0, 60));
+    setBusy(false);
+  };
+  return (
+    <span className="ml-auto flex items-center gap-2">
+      <span className="text-[10.5px]" style={{ color: "var(--cb-muted)" }}>
+        {lastBackupAt ? `last: ${new Date(lastBackupAt).toLocaleString()}` : "never"}
+      </span>
+      <button onClick={run} disabled={busy} className="cb-focus px-2 py-1 rounded text-[11px] font-medium text-white disabled:opacity-40" style={{ background: "var(--cb-accent)" }}>
+        {busy ? "…" : "Backup now"}
+      </button>
+      {msg && <span className="text-[10.5px]">{msg}</span>}
+    </span>
+  );
+}

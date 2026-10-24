@@ -1,5 +1,6 @@
 // Google Gemini native provider.
-// Endpoint: POST {baseUrl}/v1beta/models/{model}:streamGenerateContent?alt=sse
+// Endpoint: POST {baseUrl}/v1beta/models/{model}:streamGenerateContent?alt=sse  (stream)
+//           POST {baseUrl}/v1beta/models/{model}:generateContent              (non-stream, JSON)
 // Auth:     ?key={apiKey} (query param, NOT a header)
 // Body:     { contents: [{role:"user"|"model", parts:[{text}]}], systemInstruction: {parts:[{text}]}, generationConfig: {temperature, maxOutputTokens} }
 // Stream:   SSE with a sequence of JSON objects {candidates:[{content:{parts:[{text}]}}], usageMetadata:{...}}
@@ -14,8 +15,16 @@ export function buildGoogleRequest({ model, messages, systemPrompt, temperature,
       parts: [{ text: typeof m.content === "string" ? m.content : (m.content?.[0]?.text || "") }],
     }));
 
+  const base = apiBase.replace(/\/+$/, "");
+  const modelPath = `v1beta/models/${encodeURIComponent(model)}`;
+  // Streaming uses :streamGenerateContent with SSE framing; a non-streaming
+  // call must hit :generateContent, which answers plain JSON.
+  const url = stream
+    ? `${base}/${modelPath}:streamGenerateContent?alt=sse&key=${encodeURIComponent(apiKey)}`
+    : `${base}/${modelPath}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
   return {
-    url: `${apiBase.replace(/\/+$/, "")}/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(apiKey)}`,
+    url,
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: {

@@ -71,6 +71,13 @@ function MediaPreview({ path }) {
       </div>
     );
   }
+  if (/\.pdf$/i.test(path)) {
+    return (
+      <div className="h-full p-2">
+        <iframe src={`/api/pc/raw?path=${encodeURIComponent(path)}`} title={path.split(/[\/]/).pop()} className="h-full w-full rounded-lg border-0 bg-white" />
+      </div>
+    );
+  }
   if (isPptx(path)) {
     if (err) return <div className="flex h-full items-center justify-center p-4 text-center text-[11px] text-[var(--txt-dim)]">প্রিভিউ নেই — {err}</div>;
     if (!slides) return <div className="flex h-full items-center justify-center gap-2 text-[11px] text-[var(--txt-dim)]"><Loader2 size={13} className="animate-spin" /> স্লাইড লোড হচ্ছে…</div>;

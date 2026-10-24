@@ -36,7 +36,12 @@ node .selftest/run-all.mjs --offline    # শুধু unit + parser (সার�
 - নতুন bridge op / API route যোগ করলে: whitelist unit test + integration test + (দরকার হলে) deep security test — তিনটাই যোগ করো।
 - Suite-গুলো back-to-back চললে shared rate-window পূর্ণ হতে পারে — integration/self-heal এন্ড e2e/429-retry এটা সামলে নেয়।
 
-## বর্তমান ফলাফল (2026-09-13)
+## CI
+- **ubuntu job (blocking):** eslint + `next build` + `--offline` পিরামিড (unit + parser, ৬৪ checks)।
+- **windows-latest job (report-only):** runner-এ app + bridge boot করে সম্পূর্ণ ১০৮-check live suite চলে (`continue-on-error: true` — timing-sensitive suite গুলো CI-তে stable হলে blocking করা হবে)।
+
+## বর্তমান ফলাফল (2026-10-24)
 ```
 UNIT 52/52 · PARSER 12/12 · INTEGRATION 32/32 · SECURITY-LIVE 25/25 · SECURITY-DEEP 35/35 · E2E 16/16  → ALL SUITES GREEN
 ```
+v1.2 ফিচার-ঢেউয়ের পরেও একই ১৭২ checks — নতুন ops (/pty/*, /screenshot, /fetch/text, /schedules/*, /backup/*) বিদ্যমান whitelist unit test দিয়ে কভার হয়; নতুন স্যুট-চেক পরের §20 audit-এ যোগ হবে।

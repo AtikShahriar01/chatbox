@@ -6,7 +6,7 @@
 // untrusted input: every action is validated against the tool registry before
 // the bridge ever sees it (TRD §20).
 
-import { callModel } from "./agents";
+import { callModel, skillsBlock } from "./agents";
 import { validateCall, toolPrompt, riskLevel } from "./agent-tools";
 import { pc } from "./pc";
 import { useIde, newId } from "./ide-store";
@@ -21,6 +21,8 @@ WORKSPACE (the only place you may touch): ${workspace || "(not set)"}
 
 TOOLS (call EXACTLY ONE per reply):
 ${toolPrompt()}
+
+USER-DEFINED SKILLS: ${skillsBlock() || "(none)"}
 
 REPLY FORMAT — reply with ONLY a JSON object, no markdown, no prose:
 {"thought": "<1-2 sentences reasoning>", "tool": "<tool name>", <tool args as JSON fields>}
@@ -115,7 +117,7 @@ export function createAgent() {
     git_branch: "/git/branch", git_stage: "/git/stage",
     create_checkpoint: "/checkpoint/create", list_checkpoints: "/checkpoint/list",
     rollback: "/checkpoint/rollback", inspect_project: "/project/inspect",
-    system_info: "/sysinfo",
+    system_info: "/sysinfo", read_url: "/fetch/text",
     make_docx: "/make/docx", make_xlsx: "/make/xlsx",
     make_pptx: "/make/pptx", make_audio: "/make/audio",
     make_pdf: "/make/pdf", list_voices: "/list/voices", edit_audio: "/edit/audio",
@@ -255,6 +257,28 @@ export function createAgent() {
     // record, never the stale local object.
     const getLive = () => useIde.getState().tasks.find((t) => t.id === task.id) || task;
 
+    // ask_user: surface a question card (TodoPanel) and wait for the user's
+    // answer as the tool result. Auto-resolves if the task is stopped so the
+    // loop can never hang on an abandoned question.
+    const askUser = (question, options) =>
+      new Promise((resolve) => {
+        let settled = false;
+        const settle = (v) => {
+          if (settled) return;
+          settled = true;
+          clearInterval(iv);
+          useIde.getState().clearPendingQuestion();
+          resolve(v);
+        };
+        useIde.getState().setPendingQuestion({
+          taskId: task.id,
+          question: String(question || "").slice(0, 1000),
+          options: Array.isArray(options) ? options.map((o) => String(o).slice(0, 100)).slice(0, 6) : [],
+          answer: settle,
+        });
+        const iv = setInterval(() => { if (stopped) settle("(no answer — the task was stopped)"); }, 400);
+      });
+
     const messages = [
       { role: "system", content: sysPrompt(cfg.workspace, cfg.extra) },
       { role: "user", content: `TASK: ${cfg.goal}\n\nBegin. Inspect before you edit, checkpoint before your first edit. Then for every code change follow the MANDATORY CODE LOOP: write → run → read output → fix if wrong → run again → only say done after a successful final run.` },
@@ -277,7 +301,16 @@ export function createAgent() {
         if (stopped) { finish("cancelled"); return getLive(); }
         step++;
 
-        store.updateTask(task.id, { status: "running", steps: [...task.steps, { title: `Step ${step}`, status: "running", detail: "thinking…", tools: 0, startedAt: Date.now() }] });
+        // The local `task` const is a stale snapshot — read the LIVE steps
+        // from the store. A retry (step-- then step++) re-enters this line,
+        // so reuse that step's slot instead of appending a duplicate.
+        const stepEntry = { title: `Step ${step}`, status: "running", detail: "thinking…", tools: 0, startedAt: Date.now() };
+        const liveSteps = getLive().steps || [];
+        if (liveSteps.length >= step) {
+          store.updateTaskStep(task.id, step - 1, stepEntry);
+        } else {
+          store.updateTask(task.id, { status: "running", steps: [...liveSteps, stepEntry] });
+        }
         onEvent({ type: "step", step });
 
         let reply;
@@ -376,6 +409,104 @@ export function createAgent() {
           store.updateTaskStep(task.id, step - 1, { status: "done", detail: `todo ${doneN}/${todos.length}`, tools: 1 });
           messages.push({ role: "assistant", content: JSON.stringify(action) });
           messages.push({ role: "user", content: `TODO LIST RECORDED (${todos.length} items, ${doneN} done). Continue with the next single JSON action.` });
+          continue;
+        }
+
+        // ask_user — handled INSIDE the engine (never reaches the bridge):
+        // show the question card, block until the user answers.
+        if (call.tool === "ask_user") {
+          cfg.onStatus?.("❓ আপনার কাছে প্রশ্ন — উত্তর দিন…");
+          store.pushActivity({ actor: "agent", action: "ask_user", resource: String(call.args.question || "").slice(0, 80), result: "waiting", risk: "low" });
+          const answer = await askUser(call.args.question, action.options);
+          store.pushActivity({ actor: "user", action: "answered", resource: String(answer).slice(0, 80), result: "ok", risk: "low" });
+          store.updateTaskStep(task.id, step - 1, { status: "done", detail: "ask_user answered", tools: 1 });
+          messages.push({ role: "assistant", content: JSON.stringify(action) });
+          messages.push({ role: "user", content: `USER ANSWER: ${String(answer).slice(0, 2000)}
+
+Continue with the next single JSON action, or {"done": "..."}.` });
+          continue;
+        }
+
+        // screenshot — handled INSIDE the engine: the base64 PNG must become a
+        // VISION content part, not a text observation. Works with OpenAI-compatible
+        // vision models; the observation message carries the image + a short cue.
+        if (call.tool === "screenshot") {
+          cfg.onStatus?.("📸 স্ক্রিনশট নিচ্ছি…");
+          const shot = await pc("/screenshot", {});
+          store.updateTaskStep(task.id, step - 1, { status: shot?.ok ? "done" : "failed", detail: "screenshot", tools: 1 });
+          messages.push({ role: "assistant", content: JSON.stringify(action) });
+          if (shot?.ok && shot.base64) {
+            store.pushActivity({ actor: "agent", action: "screenshot", resource: (shot.bytes / 1024).toFixed(0) + " KB", result: "ok", risk: riskLevel("screenshot") });
+            messages.push({
+              role: "user",
+              content: [
+                { type: "text", text: 'SCREENSHOT CAPTURED (see attached image). Read the screen and continue with the next single JSON action, or {"done": "..."}.' },
+                { type: "image_url", image_url: { url: "data:image/png;base64," + shot.base64 } },
+              ],
+            });
+          } else {
+            messages.push({ role: "user", content: `TOOL RESULT (screenshot): ${String(shot?.error || "failed").slice(0, 300)}
+
+Continue with the next single JSON action.` });
+          }
+          continue;
+        }
+
+        // show_html — engine-local: hand the file to the IDE Preview pane
+        // (sandboxed static iframe). The file must exist in the workspace.
+        if (call.tool === "show_html") {
+          const hp = String(call.args.path || "").trim();
+          const okPath = /^(([\w.-]+[\/])*)[\w.-]+\.html?$/i.test(hp);
+          if (!hp || !okPath) {
+            messages.push({ role: "assistant", content: JSON.stringify(action) });
+            messages.push({ role: "user", content: "TOOL RESULT (show_html): ERROR - path must be a relative .html file inside the workspace (e.g. preview.html or charts/index.html).\n\nContinue with the next single JSON action." });
+            store.updateTaskStep(task.id, step - 1, { status: "failed", detail: "show_html bad path", tools: 1 });
+            continue;
+          }
+          useIde.getState().setPreviewPath(hp);
+          store.pushActivity({ actor: "agent", action: "show_html", resource: hp, result: "ok", risk: "low" });
+          cfg.onStatus?.("🖥️ প্রিভিউ খুলছি: " + hp);
+          store.updateTaskStep(task.id, step - 1, { status: "done", detail: "preview: " + hp, tools: 1 });
+          messages.push({ role: "assistant", content: JSON.stringify(action) });
+          messages.push({ role: "user", content: "TOOL RESULT (show_html): OK - the file is now open in the user's Preview pane.\n\nContinue with the next single JSON action, or {\"done\": \"...\"}." });
+
+          continue;
+        }
+
+        // see_image - handled INSIDE the engine: fetch the workspace image via
+        // the raw proxy and attach it as a VISION content part.
+        if (call.tool === "see_image") {
+          cfg.onStatus?.("🖼️ ছবি দেখছি…");
+          const imgPath = String(call.args.path || "").trim();
+          let dataUrl = null;
+          try {
+            const res = await fetch("/api/pc/raw?path=" + encodeURIComponent(imgPath));
+            if (res.ok) {
+              const blob = await res.blob();
+              if (blob.size <= 5 * 1024 * 1024 && /^image\//.test(blob.type || "")) {
+                dataUrl = await new Promise((resolve) => {
+                  const fr = new FileReader();
+                  fr.onload = () => resolve(fr.result);
+                  fr.onerror = () => resolve(null);
+                  fr.readAsDataURL(blob);
+                });
+              }
+            }
+          } catch {}
+          store.updateTaskStep(task.id, step - 1, { status: dataUrl ? "done" : "failed", detail: "see_image " + imgPath, tools: 1 });
+          messages.push({ role: "assistant", content: JSON.stringify(action) });
+          if (dataUrl) {
+            store.pushActivity({ actor: "agent", action: "see_image", resource: imgPath, result: "ok", risk: "low" });
+            messages.push({
+              role: "user",
+              content: [
+                { type: "text", text: "IMAGE ATTACHED (" + imgPath + "). Describe what you see and continue with the next single JSON action, or {\"done\": \"...\"}." },
+                { type: "image_url", image_url: { url: dataUrl } },
+              ],
+            });
+          } else {
+            messages.push({ role: "user", content: "TOOL RESULT (see_image): could not load the image (missing file or not png/jpg/webp/gif under 5MB). Continue with the next single JSON action." });
+          }
           continue;
         }
 

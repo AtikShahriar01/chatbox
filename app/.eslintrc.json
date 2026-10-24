@@ -1,0 +1,9 @@
+{
+  "extends": "next/core-web-vitals",
+  "rules": {
+    // The app intentionally uses <img> for data-URL previews (attachments,
+    // generated images) — next/image adds nothing for inline data URLs.
+    "@next/next/no-img-element": "off"
+  },
+  "ignorePatterns": ["public/monaco-vscode/**", ".next/**", "node_modules/**"]
+}

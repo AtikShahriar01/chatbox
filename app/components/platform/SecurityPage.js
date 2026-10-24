@@ -124,7 +124,7 @@ export default function SecurityPage() {
           <OctagonX size={15} /> Emergency stop
         </h2>
         <p className="mt-1 text-[11.5px]" style={{ color: "var(--txt-dim)" }}>
-          সব agent-started প্রসেস ও টার্মিনাল সাথে সাথে বন্ধ করবে এবং permission mode "ask"-এ নামিয়ে দেবে।
+          সব agent-started প্রসেস ও টার্মিনাল সাথে সাথে বন্ধ করবে এবং permission mode &quot;ask&quot;-এ নামিয়ে দেবে।
         </p>
         <button onClick={emergencyStop} className="mt-2 rounded-lg px-4 py-2 text-[12.5px] font-bold text-white" style={{ background: "var(--err)" }}>
           STOP EVERYTHING

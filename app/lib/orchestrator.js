@@ -162,9 +162,10 @@ export async function orchestrate({ apiBaseUrl, apiKey, apiModel, userText, hist
       }
     }
 
-    // [3] Workers — agents run one after another (many providers, especially
-    // free tiers, reject parallel calls with hard concurrency limits). Each
-    // one updates its own card live, so the UI still feels animated.
+    // [3] Workers — ZCode-style fan-out: cfg.concurrency (Settings → Chat →
+    // Parallel agents) agents work at once; 1 = the old sequential mode for
+    // strict free tiers (429s are retried with backoff either way). Each one
+    // updates its own card live, so the UI still feels animated.
     // NOTE: the CEO card (id "ceo") is excluded — it stays "done" with its
     // analysis/plan notes for the user to reopen.
     state.phase = "workers";
@@ -173,12 +174,12 @@ export async function orchestrate({ apiBaseUrl, apiKey, apiModel, userText, hist
       s.output = "";
     });
     const workers = state.subtasks.filter((s) => s.id !== "ceo");
-    // Show the first as working, the rest queued until their turn.
-    workers.forEach((s, i) => { if (i > 0) s.status = "pending"; });
-    if (workers[0]) { workers[0].status = "working"; }
+    const concurrency = Math.max(1, Math.min(4, Number(cfg.concurrency) || 1));
+    // The first `concurrency` workers start immediately; the rest show queued.
+    workers.forEach((s, i) => { s.status = i < concurrency ? "working" : "pending"; });
     emit();
 
-    for (const s of workers) {
+    const runOne = async (s) => {
       checkAbort();
       s.status = "working";
       s.liveText = "";
@@ -233,6 +234,24 @@ export async function orchestrate({ apiBaseUrl, apiKey, apiModel, userText, hist
       }
       s.liveText = "";
       emit();
+    };
+
+    if (concurrency <= 1) {
+      for (const s of workers) await runOne(s);
+    } else {
+      // Parallel pool: each lane pulls the next subtask when it finishes.
+      // An AbortError rethrown by a lane rejects Promise.all → the outer
+      // catch flips the whole orchestration to "stopped" (other lanes die
+      // via the shared abort signal).
+      let cursor = 0;
+      const lanes = Array.from({ length: Math.min(concurrency, workers.length) }, async () => {
+        while (true) {
+          const i = cursor++;
+          if (i >= workers.length) return;
+          await runOne(workers[i]);
+        }
+      });
+      await Promise.all(lanes);
     }
     checkAbort();
     // Individual failures are already marked "failed" and tolerated.

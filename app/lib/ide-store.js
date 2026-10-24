@@ -106,6 +106,15 @@ export const useIde = create()(
         }, ...s.taskHistory].slice(0, 50),
       })),
       clearTaskHistory: () => set({ taskHistory: [] }),
+      // Static HTML preview (show_html tool): agent-written file shown in the
+      // IDE Preview pane via the sandboxed /api/pc/html route.
+      previewPath: null,
+      setPreviewPath: (path) => set({ previewPath: path || null }),
+      // Agent asks the user a clarifying question mid-task (ask_user tool):
+      // { taskId, question, options[], answer(resolve) } — transient.
+      pendingQuestion: null,
+      setPendingQuestion: (q) => set({ pendingQuestion: q }),
+      clearPendingQuestion: () => set({ pendingQuestion: null }),
       taskQueue: [], // queued goal strings
       enqueueTask: (goal) => set((s) => ({ taskQueue: [...s.taskQueue, String(goal).slice(0, 500)] })),
       dequeueTask: () => { const s = get(); const [head, ...rest] = s.taskQueue; set({ taskQueue: rest }); return head || null; },

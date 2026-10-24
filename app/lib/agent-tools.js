@@ -8,6 +8,11 @@ export const TOOLS = {
   // The agent's live checklist — handled INSIDE the engine (never reaches the
   // bridge). Big tasks must start with it and update it as work progresses,
   // so the user watches items tick off in real time.
+  ask_user:     { op: "_ask_user", args: ["question"], desc: "Ask the user a clarifying question and WAIT for their answer (ZCode-style). Use only when genuinely blocked on a decision only the user can make — otherwise pick sensible defaults and continue. options = optional array of short choices shown as buttons.", risk: "low", readOnly: true },
+  screenshot:   { op: "/screenshot", args: [], desc: "Take a screenshot of the user's screen and LOOK at it (vision models). Use to verify visual/UI work, or when the user refers to something on their screen. Requires a vision-capable OpenAI-compatible model.", risk: "medium", readOnly: true },
+  read_url:     { op: "/fetch/text", args: ["url"], desc: "Fetch a web page and read its text (first ~20k chars). Use to read documentation, articles, or pages the user links. SSRF-guarded; private/loopback targets are blocked.", risk: "low", readOnly: true },
+  see_image:    { op: "_see_image", args: ["path"], desc: "LOOK at an image file from the workspace (vision models): png/jpg/webp/gif. Use when the user references an image file, or to visually inspect assets you created. Relative to the workspace.", risk: "low", readOnly: true },
+  show_html:    { op: "_show_html", args: ["path"], desc: "Open an HTML file you wrote (relative to the workspace) in the user's Preview pane, sandboxed. Use to show charts, demos, mockups, generated reports. The HTML must exist - write_file it first.", risk: "low", readOnly: true },
   set_todo:     { op: "_set_todo", args: ["items"], desc: "Publish or update your live task checklist. items = array of {text, status} where status is one of: pending, doing, done, failed. Start every task by publishing 3-8 steps, then update statuses as you finish each one.", risk: "low", readOnly: true },
 
   // ------------------------------------------------------------ files ----

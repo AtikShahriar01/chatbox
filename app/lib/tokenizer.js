@@ -1,13 +1,16 @@
-// Lightweight token estimator. 1 token ≈ 4 chars in English. Not perfect
-// (no BPE, no CJK handling) but good enough for context-window UX.
+// Lightweight token estimator. Not BPE — a per-script chars/token model:
+// CJK ≈ 1.5 chars/token, Bengali/Indic ≈ 2, Arabic ≈ 2, Latin/English ≈ 4.
+// Good enough for context-window UX; the Bengali ratio matters most because
+// prompts and replies in this app are Bengali-heavy.
 
 export function estimateTokens(text) {
   if (!text) return 0;
-  // For CJK, average is closer to 1.5 chars/token; for English, ~4.
-  // We mix: 0.6 English-weighted + 0.4 CJK-weighted based on char distribution.
-  const cjkCount = (text.match(/[一-鿿]/g) || []).length;
-  const otherCount = text.length - cjkCount;
-  return Math.ceil(otherCount / 4 + cjkCount / 1.5);
+  const cjk = (text.match(/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/g) || []).length; // kana + Han
+  const indic = (text.match(/[\u0900-\u097f\u0980-\u09ff\u0a00-\u0a7f\u0b00-\u0b7f\u0c00-\u0c7f\u0d00-\u0d7f]/g) || []).length; // Devanagari, Bengali, Gurmukhi, Gujarati, Oriya, Tamil-Telugu-Kannada-Malayalam blocks
+  const arabic = (text.match(/[\u0600-\u06ff\u0750-\u077f]/g) || []).length;
+  const complexCount = cjk + indic + arabic;
+  const otherCount = text.length - complexCount;
+  return Math.ceil(otherCount / 4 + cjk / 1.5 + indic / 2 + arabic / 2);
 }
 
 export function estimateMessagesTokens(messages) {

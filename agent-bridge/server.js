@@ -360,6 +360,277 @@ function termKill(id) {
   return { ok: true };
 }
 
+// ------------------------------------------------------- PTY terminals -----
+// Real ConPTY terminals (@lydell/node-pty, prebuilt binaries — optional dep):
+// arrow keys, history and colors work in the browser xterm. The older
+// line-mode /term/* routes stay untouched as the fallback.
+let pty = null;
+try { pty = require("@lydell/node-pty"); } catch { pty = null; }
+
+const ptys = new Map(); // id → { id, term, cwd, kind }
+let ptySeq = 1;
+
+function ptyCreate(cwd, shell = "cmd") {
+  if (!pty) return { ok: false, error: "node-pty not available — line-mode terminals still work" };
+  const dir = cwd ? resolvePath(cwd) : effectiveWorkspace();
+  const c = confine(dir);
+  if (!c.ok) return { ok: false, error: c.error };
+  if (ptys.size >= 10) return { ok: false, error: "max 10 PTY sessions (kill one first)" };
+  const usePs = String(shell).toLowerCase() === "powershell";
+  const id = "p" + Date.now().toString(36) + (ptySeq++);
+  outInit(id);
+  try {
+    const term = pty.spawn(usePs ? "powershell.exe" : "cmd.exe",
+      usePs ? ["-NoProfile", "-ExecutionPolicy", "Bypass"] : [],
+      { name: "xterm-256color", cwd: c.path, env: { ...process.env, PROMPT: "$P$G" }, cols: 100, rows: 30 });
+    term.onData((d) => outPush(id, d));
+    term.onExit(() => { const o = outputs.get(id); if (o) o.closed = true; ptys.delete(id); });
+    ptys.set(id, { id, term, cwd: c.path, kind: usePs ? "powershell" : "cmd" });
+    audit("PTY_NEW", `${usePs ? "powershell" : "cmd"} @ ${c.path}`);
+    return { ok: true, id, cwd: c.path, shell: usePs ? "powershell" : "cmd", pty: true };
+  } catch (e) {
+    return { ok: false, error: "pty spawn failed: " + String(e.message).slice(0, 150) };
+  }
+}
+
+function ptyWrite(id, input) {
+  const t = ptys.get(id);
+  if (!t) return { ok: false, error: "no such pty" };
+  const raw = String(input);
+  // Command policy guards typed LINES (a command submits on \r); raw control
+  // bytes — arrow keys, Tab-completion, Ctrl+C — pass through untouched,
+  // they are navigation, not commands.
+  if (raw.includes("\r") || raw.includes("\n")) {
+    const policy = commandPolicy(raw);
+    if (policy) { audit("BLOCK", raw.slice(0, 120), policy); return { ok: false, error: policy }; }
+  }
+  audit("PTY_IN", raw.slice(0, 160));
+  try { t.term.write(raw); return { ok: true }; }
+  catch (e) { return { ok: false, error: "pty write failed: " + String(e.message).slice(0, 120) }; }
+}
+
+function ptyResize(id, cols, rows) {
+  const t = ptys.get(id);
+  if (!t) return { ok: false, error: "no such pty" };
+  try {
+    t.term.resize(Math.max(20, Math.min(500, Number(cols) || 100)), Math.max(5, Math.min(200, Number(rows) || 30)));
+    return { ok: true };
+  } catch (e) { return { ok: false, error: String(e.message).slice(0, 120) }; }
+}
+
+function ptyKill(id) {
+  const t = ptys.get(id);
+  if (!t) return { ok: false, error: "no such pty" };
+  audit("PTY_KILL", id);
+  try { t.term.kill(); } catch {}
+  ptys.delete(id);
+  return { ok: true };
+}
+
+// ------------------------------------------------------- screenshot --------
+// Full-virtual-screen capture via PowerShell (System.Drawing — no extra deps).
+// Returns base64 PNG so the agent can SEE the screen (vision models).
+const SCREENSHOT_DIR = path.join(os.tmpdir(), "chatbox-bridge");
+const SCREENSHOT_PS = path.join(SCREENSHOT_DIR, "shot.ps1");
+function ensureScreenshotScript() {
+  fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
+  if (!fs.existsSync(SCREENSHOT_PS)) {
+    const ps = [
+      "param([string]$Out)",
+      "Add-Type -AssemblyName System.Windows.Forms",
+      "Add-Type -AssemblyName System.Drawing",
+      "$b = [System.Windows.Forms.SystemInformation]::VirtualScreen",
+      "$bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height",
+      "$g = [System.Drawing.Graphics]::FromImage($bmp)",
+      "$g.CopyFromScreen($b.Left, $b.Top, 0, 0, $bmp.Size)",
+      "$bmp.Save($Out, [System.Drawing.Imaging.ImageFormat]::Png)",
+      "$g.Dispose(); $bmp.Dispose()",
+      "Write-Output saved",
+    ].join("\r\n");
+    fs.writeFileSync(SCREENSHOT_PS, ps, "utf8");
+  }
+}
+async function screenshot() {
+  if (!IS_WIN) return { ok: false, error: "screenshots are Windows-only" };
+  ensureScreenshotScript();
+  const outFile = path.join(SCREENSHOT_DIR, "shot-" + Date.now() + ".png");
+  const r = await new Promise((resolve) => {
+    execFile("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", SCREENSHOT_PS, "-Out", outFile],
+      { timeout: 30000, windowsHide: true, maxBuffer: 1e6 }, (err, stdout) => resolve({ err, stdout: String(stdout || "") }));
+  });
+  if (r.err || !fs.existsSync(outFile)) {
+    return { ok: false, error: "screenshot failed: " + String(r.err?.message || r.err || "no output file").slice(0, 150) };
+  }
+  const buf = fs.readFileSync(outFile);
+  audit("SCREENSHOT", (buf.length / 1024).toFixed(0) + " KB");
+  try { fs.unlinkSync(outFile); } catch {}
+  return { ok: true, base64: buf.toString("base64"), bytes: buf.length, type: "image/png" };
+}
+
+// ------------------------------------------------------------ fetch text ---
+// Read a web page as text (SSRF-guarded with manual redirect following, same
+// policy as /file/download). Lets the agent read docs/articles user links.
+async function fetchText(url, maxBytes) {
+  if (!/^https?:\/\//i.test(url || "")) return { ok: false, error: "missing/invalid url" };
+  const SSRF_BLOCK = /^(localhost|.*\.localhost|127\.|10\.|192\.168\.|169\.254\.|0\.0\.0\.0|::1|fe80:|f[cd][0-9a-f]{2}:|metadata\.google\.internal$)/i;
+  const ssrfBadHost = (hostname) => {
+    const host = normalizeHostIp(hostname);
+    const m172 = host.match(/^172\.(\d+)\./);
+    return SSRF_BLOCK.test(host) || !!(m172 && Number(m172[1]) >= 16 && Number(m172[1]) <= 31);
+  };
+  let target;
+  try { target = new URL(url); } catch { return { ok: false, error: "invalid url" }; }
+  if (ssrfBadHost(target.hostname)) { audit("BLOCK", "fetch " + url.slice(0, 100), "SSRF private target"); return { ok: false, error: "blocked: private/loopback target" }; }
+  let res;
+  for (let hop = 0; ; hop++) {
+    try {
+      res = await fetch(target.href, { redirect: "manual", signal: AbortSignal.timeout(45000) });
+    } catch (e) {
+      return { ok: false, error: "fetch failed: " + String(e?.message || e).slice(0, 150) };
+    }
+    if ([301, 302, 303, 307, 308].includes(res.status)) {
+      const loc = res.headers.get("location");
+      if (!loc || hop >= 5) return { ok: false, error: "too many / invalid redirects" };
+      let next;
+      try { next = new URL(loc, target); } catch { return { ok: false, error: "bad redirect url" }; }
+      if (next.protocol !== "http:" && next.protocol !== "https:") return { ok: false, error: "blocked: redirect to non-http scheme" };
+      if (ssrfBadHost(next.hostname)) { audit("BLOCK", "fetch redirect → " + next.href.slice(0, 100), "SSRF private redirect"); return { ok: false, error: "blocked: private/loopback redirect target" }; }
+      target = next;
+      continue;
+    }
+    break;
+  }
+  if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+  const type = res.headers.get("content-type") || "";
+  let html = await res.text();
+  if (/pdf/i.test(type)) return { ok: false, error: "PDF is not text — download it with download_file instead" };
+  const title = (/<title[^>]*>([\s\S]*?)<\/title>/i.exec(html) || [])[1] || "";
+  let text = html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|h[1-6]|tr|section|article)>/gi, "\n")
+    .replace(/<[^>]+>/g, " ");
+  text = text
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n\s*\n\s*\n+/g, "\n\n")
+    .trim();
+  audit("FETCH", url.slice(0, 120));
+  return { ok: true, url: target.href, title: title.trim().slice(0, 200), text: text.slice(0, Number(maxBytes) || 20000) };
+}
+
+// ------------------------------------------------- schedules & automation ---
+// Always-on automations (ZCode-style cron): the app pushes its schedules here
+// (with BYOK credentials); the bridge ticks every 30s and runs them EVEN WHEN
+// THE BROWSER IS CLOSED. Results land in agent-bridge/automation-runs/*.md.
+// These routes are app-config (like /workspace) — handled before the approval
+// gate, but still token-authenticated and audited.
+const SCHEDULES_FILE = path.join(__dirname, "schedules.json");
+const AUTOMATION_DIR = path.join(__dirname, "automation-runs");
+const BACKUP_DIR = path.join(__dirname, "backups");
+let automationBusy = false;
+let schedulesTimer = null;
+
+function readSchedules() {
+  try { return JSON.parse(fs.readFileSync(SCHEDULES_FILE, "utf8")); } catch { return []; }
+}
+function writeSchedules(list) {
+  fs.writeFileSync(SCHEDULES_FILE, JSON.stringify(list.slice(0, 50), null, 2), "utf8");
+}
+function computeNextRun(sc, fromNow = Date.now()) {
+  if (sc.kind === "daily") {
+    const parts = String(sc.dailyTime || "09:00").split(":");
+    const d = new Date(fromNow);
+    d.setHours(parseInt(parts[0]) || 0, parseInt(parts[1]) || 0, 0, 0);
+    if (d.getTime() <= fromNow) d.setDate(d.getDate() + 1);
+    return d.getTime();
+  }
+  const every = Math.max(5, Number(sc.everyMinutes) || 60);
+  return fromNow + every * 60000;
+}
+
+async function runAutomation(sc) {
+  const now = Date.now();
+  // missed by >10min (machine was off) → skip forward, don't stampede
+  const missed = sc.nextRun && now - sc.nextRun > 10 * 60000;
+  const list = readSchedules();
+  const entry = list.find((x) => x.id === sc.id);
+  if (entry) {
+    entry.lastRun = new Date().toISOString();
+    entry.nextRun = computeNextRun(sc, missed ? now : sc.nextRun);
+    writeSchedules(list);
+  }
+  if (missed) { audit("AUTOMATION", `${sc.id} skipped (missed window)`); return; }
+  if (automationBusy) { audit("AUTOMATION", `${sc.id} deferred (busy)`); return; }
+  automationBusy = true;
+  const id = (sc.id || "scd").slice(0, 24).replace(/[^\w-]/g, "");
+  const file = path.join(AUTOMATION_DIR, `${id}-${now}.md`);
+  try {
+    fs.mkdirSync(AUTOMATION_DIR, { recursive: true });
+    let content = "";
+    try {
+      const res = await fetch(`${String(sc.apiBaseUrl || "").replace(/\/+$/, "")}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(sc.apiKey ? { Authorization: `Bearer ${sc.apiKey}` } : {}) },
+        body: JSON.stringify({
+          model: sc.model || "gpt-4o-mini",
+          messages: [
+            { role: "system", content: "You are a helpful assistant running a scheduled automation. Answer concisely and actionably." },
+            { role: "user", content: String(sc.prompt || "").slice(0, 4000) },
+          ],
+          temperature: 0.4,
+        }),
+        signal: AbortSignal.timeout(120000),
+      });
+      const data = await res.json().catch(() => null);
+      content = data?.choices?.[0]?.message?.content || `ERROR: HTTP ${res.status}`;
+    } catch (e) {
+      content = "ERROR: " + String(e?.message || e).slice(0, 300);
+    }
+    const header = `# Automation ${id}\n\n- prompt: ${String(sc.prompt || "").slice(0, 200)}\n- at: ${new Date().toISOString()}\n\n---\n\n`;
+    fs.writeFileSync(file, header + String(content).slice(0, 100000), "utf8");
+    // keep the newest 20 result files
+    const files = fs.readdirSync(AUTOMATION_DIR).filter((f) => f.endsWith(".md")).sort();
+    for (const old of files.slice(0, Math.max(0, files.length - 20))) {
+      try { fs.unlinkSync(path.join(AUTOMATION_DIR, old)); } catch {}
+    }
+    audit("AUTOMATION", `${id} ran (${(fs.statSync(file).size / 1024).toFixed(1)} KB)`);
+  } catch (e) {
+    audit("AUTOMATION", `${id} failed: ${String(e?.message || e).slice(0, 100)}`);
+  } finally {
+    automationBusy = false;
+  }
+}
+
+function st2iso(file) {
+  const m = file.match(/(\d{13})/);
+  return m ? new Date(Number(m[1])).toISOString() : null;
+}
+
+function startSchedulesTicker() {
+  if (schedulesTimer) return;
+  schedulesTimer = setInterval(() => {
+    try {
+      const now = Date.now();
+      for (const sc of readSchedules()) {
+        if (!sc.enabled) continue;
+        if (!sc.nextRun) {
+          const list = readSchedules();
+          const entry = list.find((x) => x.id === sc.id);
+          if (entry) { entry.nextRun = computeNextRun(sc, now); writeSchedules(list); }
+          continue;
+        }
+        if (now >= Number(sc.nextRun)) runAutomation(sc);
+      }
+    } catch {}
+  }, 30000);
+  audit("AUTOMATION", "ticker started");
+}
+startSchedulesTicker();
+
 // ------------------------------------------------------------- checkpoints ---
 // Snapshot-based checkpoints (work with or without git) + git commit for repos.
 function cpIndex() {
@@ -850,7 +1121,7 @@ const pending = new Map();
 let nextReqId = 1;
 
 // kind is the route minus the leading slash, e.g. "file/read", "proc/list".
-const SAFE_READ = ["file/read", "file/list", "grep", "search/files", "project/inspect", "sysinfo", "git/status", "git/diff", "git/log", "git/branch", "proc/list", "proc/output", "term/list", "term/output", "checkpoint/list", "office/preview", "voices/edge", "list/voices", "audit"];
+const SAFE_READ = ["file/read", "file/list", "grep", "search/files", "project/inspect", "sysinfo", "git/status", "git/diff", "git/log", "git/branch", "proc/list", "proc/output", "term/list", "term/output", "pty/list", "pty/output", "checkpoint/list", "office/preview", "voices/edge", "list/voices", "audit"];
 function needsApproval(kind) {
   const mode = readMode();
   if (mode === "auto") return false;
@@ -921,6 +1192,85 @@ const server = http.createServer(async (req, res) => {
   }
 
   // ------------------------------------------------------- mode + approval
+  // ---- schedules & automation (app-config routes, before the approval gate) ----
+  if (route === "/schedules/set" && req.method === "POST") {
+    const parsedSch = await readBody(req);
+    if (parsedSch && parsedSch.__tooLarge) return send(res, 413, { ok: false, error: "body too large" });
+    const list = Array.isArray(parsedSch?.schedules) ? parsedSch.schedules : [];
+    const clean = list.slice(0, 50).map((sc) => ({
+      id: String(sc.id || "").slice(0, 40).replace(/[^\w-]/g, "") || "scd",
+      prompt: String(sc.prompt || "").slice(0, 2000),
+      apiBaseUrl: /^https?:\/\//i.test(String(sc.apiBaseUrl || "")) ? String(sc.apiBaseUrl).slice(0, 300) : "",
+      apiKey: String(sc.apiKey || "").slice(0, 1000),
+      model: String(sc.model || "").slice(0, 200),
+      kind: sc.kind === "daily" ? "daily" : "interval",
+      everyMinutes: Math.max(5, Math.min(10080, Number(sc.everyMinutes) || 60)),
+      dailyTime: String(sc.dailyTime || "09:00").slice(0, 5),
+      enabled: sc.enabled !== false,
+      lastRun: sc.lastRun || null,
+      nextRun: Number(sc.nextRun) || null,
+    })).filter((sc) => sc.prompt && sc.apiBaseUrl);
+    writeSchedules(clean);
+    audit("SCHEDULES", `${clean.length} schedule(s)`);
+    return send(res, 200, { ok: true, count: clean.length });
+  }
+  if (route === "/schedules/get" && (req.method === "GET" || req.method === "POST")) {
+    const list = readSchedules().map(({ apiKey, ...rest }) => ({ ...rest, hasKey: !!apiKey }));
+    return send(res, 200, { ok: true, schedules: list });
+  }
+  if (route === "/automation/results" && (req.method === "GET" || req.method === "POST")) {
+    let files = [];
+    try {
+      files = fs.readdirSync(AUTOMATION_DIR).filter((f) => f.endsWith(".md")).sort().reverse().slice(0, 20)
+        .map((f) => {
+          let size = 0, first = "";
+          try {
+            const st = fs.statSync(path.join(AUTOMATION_DIR, f));
+            size = st.size;
+            first = fs.readFileSync(path.join(AUTOMATION_DIR, f), "utf8").split("\n").slice(0, 3).join(" ").slice(0, 160);
+          } catch {}
+          return { id: f.replace(/\.md$/, ""), file: f, bytes: size, at: st2iso(f), preview: first };
+        });
+    } catch {}
+    return send(res, 200, { ok: true, results: files });
+  }
+  if (route === "/automation/result" && (req.method === "GET" || req.method === "POST")) {
+    const parsedAr = req.method === "POST" ? await readBody(req) : null;
+    const rid = String((parsedAr && parsedAr.id) || new URL(req.url, "http://x").searchParams.get("id") || "").replace(/[^\w-]/g, "");
+    if (!rid) return send(res, 400, { ok: false, error: "missing id" });
+    try {
+      const content = fs.readFileSync(path.join(AUTOMATION_DIR, rid + ".md"), "utf8");
+      return send(res, 200, { ok: true, id: rid, content: content.slice(0, 100000) });
+    } catch { return send(res, 404, { ok: false, error: "no such result" }); }
+  }
+
+  // ---- backups (full-store JSON snapshots to disk; SQLite alternative) ----
+  if (route === "/backup/store" && req.method === "POST") {
+    const parsedBk = await readBody(req);
+    if (parsedBk && parsedBk.__tooLarge) return send(res, 413, { ok: false, error: "backup too large (5MB cap)" });
+    const json = String(parsedBk?.json || "");
+    if (!json || json.length > 5 * 1024 * 1024) return send(res, 400, { ok: false, error: "invalid or oversized backup" });
+    const name = String(parsedBk?.name || "").replace(/[^\w.-]/g, "").slice(0, 60) || "chatbox-auto.json";
+    try {
+      fs.mkdirSync(BACKUP_DIR, { recursive: true });
+      fs.writeFileSync(path.join(BACKUP_DIR, name), json, "utf8");
+      const files = fs.readdirSync(BACKUP_DIR).filter((f) => f.endsWith(".json")).sort();
+      for (const old of files.slice(0, Math.max(0, files.length - 7))) {
+        try { fs.unlinkSync(path.join(BACKUP_DIR, old)); } catch {}
+      }
+      audit("BACKUP", `${name} (${(json.length / 1024).toFixed(0)} KB)`);
+      return send(res, 200, { ok: true, name, kept: Math.min(files.length, 7) });
+    } catch (e) { return send(res, 500, { ok: false, error: String(e?.message || e).slice(0, 150) }); }
+  }
+  if (route === "/backup/list" && (req.method === "GET" || req.method === "POST")) {
+    let files = [];
+    try {
+      files = fs.readdirSync(BACKUP_DIR).filter((f) => f.endsWith(".json")).sort().reverse()
+        .map((f) => ({ name: f, bytes: fs.statSync(path.join(BACKUP_DIR, f)).size }));
+    } catch {}
+    return send(res, 200, { ok: true, backups: files });
+  }
+
   if (route === "/mode" && req.method === "GET") return send(res, 200, { ok: true, mode: readMode() });
   if (route === "/mode" && req.method === "POST") {
     const parsed = await readBody(req);
@@ -1201,6 +1551,14 @@ const server = http.createServer(async (req, res) => {
 
       // -------------------------------------------------------- terminals ---
       case "/term/create": return termCreate(body.cwd, body.shell);
+      case "/pty/create": return ptyCreate(body.cwd, body.shell);
+      case "/pty/list": return { ok: true, available: !!pty, ptys: [...ptys.keys()].map((id) => ({ id, cwd: ptys.get(id).cwd, kind: ptys.get(id).kind })) };
+      case "/pty/write": return ptyWrite(body.id, body.input);
+      case "/pty/output": return outSince(body.id, Number(body.since) || 0);
+      case "/pty/resize": return ptyResize(body.id, body.cols, body.rows);
+      case "/pty/kill": return ptyKill(body.id);
+      case "/screenshot": return screenshot();
+      case "/fetch/text": return fetchText(body.url, body.maxBytes);
       case "/term/list": return { ok: true, terms: [...terms.keys()].map((id) => ({ id, cwd: terms.get(id).cwd, kind: terms.get(id).kind })) };
       case "/term/write": {
         if (!body.id || body.input == null) return { ok: false, error: "missing id/input" };
@@ -1337,6 +1695,9 @@ const server = http.createServer(async (req, res) => {
       route === "/file/delete" ? String(body.path || "") :
       route === "/file/move" ? `${body.from} → ${body.to}` :
       route === "/term/write" ? String(body.input || "").slice(0, 160) :
+      route === "/pty/write" ? String(body.input || "").slice(0, 160) :
+      route === "/file/download" ? String(body.url || "").slice(0, 160) :
+      route === "/fetch/text" ? String(body.url || "").slice(0, 160) :
       route === "/checkpoint/rollback" ? String(body.id || "") :
       route;
     const allowed = await new Promise((resolve) => {

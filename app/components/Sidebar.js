@@ -2,7 +2,7 @@
 
 import { useStore, detectProvider, PROVIDER_LABELS } from "@/lib/store";
 import { useUi } from "@/lib/ui-store";
-import { Plus, Image as ImageIcon, Search, Pin, Trash2, MessageSquare, Bot, Settings as SettingsIcon, HelpCircle, Info, PanelLeftClose, PanelLeftOpen, X, Sparkles, Github, FileText, Command, BookOpen, Activity, Code2, LayoutDashboard } from "lucide-react";
+import { Plus, Image as ImageIcon, Search, Pin, Trash2, MessageSquare, Bot, Settings as SettingsIcon, HelpCircle, Info, PanelLeftClose, PanelLeftOpen, X, Sparkles, Github, FileText, Command, BookOpen, Activity, Code2, LayoutDashboard, Pencil, Archive, ArchiveRestore, Copy } from "lucide-react";
 import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { formatCost, formatBDT, formatUSDT, formatValueBDT } from "@/lib/pricing";
@@ -18,6 +18,10 @@ export default function Sidebar({ mobileOpen, onCloseMobile }) {
   const createImageChat = useStore((s) => s.createImageChat);
   const deleteChat = useStore((s) => s.deleteChat);
   const togglePin = useStore((s) => s.togglePin);
+  const renameChat = useStore((s) => s.renameChat);
+  const toggleArchive = useStore((s) => s.toggleArchive);
+  const duplicateChat = useStore((s) => s.duplicateChat);
+  const pushToast = useStore((s) => s.pushToast);
   const setSettingsOpen = useStore((s) => s.setSettingsOpen);
   const setSidebar = useStore((s) => s.setSidebar);
   const todayUsage = useStore((s) => s.todayUsage);
@@ -40,7 +44,7 @@ export default function Sidebar({ mobileOpen, onCloseMobile }) {
     return Math.round(total * share);
   }, [monthlyUsage, todayUsage]);
 
-  const { pinned, regular } = useMemo(() => {
+  const { pinned, regular, archived } = useMemo(() => {
     const q = query.toLowerCase();
     const filtered = chats
       .filter((c) => {
@@ -51,10 +55,23 @@ export default function Sidebar({ mobileOpen, onCloseMobile }) {
       })
       .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.createdAt - a.createdAt);
     return {
-      pinned: filtered.filter((c) => c.pinned),
-      regular: filtered.filter((c) => !c.pinned),
+      pinned: filtered.filter((c) => c.pinned && !c.archived),
+      regular: filtered.filter((c) => !c.pinned && !c.archived),
+      archived: filtered.filter((c) => c.archived),
     };
   }, [chats, query]);
+
+  const doRename = (c) => {
+    const t = window.prompt("Rename chat", c.title || "");
+    if (t && t.trim()) renameChat(c.id, t.trim().slice(0, 80));
+  };
+  const doDuplicate = (c) => {
+    const id = duplicateChat(c.id);
+    if (id) {
+      setActive(id);
+      pushToast({ type: "success", message: "Chat duplicated." });
+    }
+  };
 
   const isMobile = mobileOpen !== undefined;
   const width = sidebarOpen ? 288 : 52;
@@ -189,11 +206,18 @@ export default function Sidebar({ mobileOpen, onCloseMobile }) {
 
           <div className="flex-1 overflow-y-auto px-2 pb-2 mt-1">
             <ChatSection title="Pinned" items={pinned} activeChatId={activeChatId}
-              onSelect={(id) => { setActive(id); onCloseMobile?.(); }} onDelete={deleteChat} onPin={togglePin} />
+              onSelect={(id) => { setActive(id); onCloseMobile?.(); }}
+              onRename={doRename} onDuplicate={doDuplicate} onArchive={toggleArchive}
+              onDelete={deleteChat} onPin={togglePin} />
             <ChatSection title="Chats" items={regular} activeChatId={activeChatId}
-              onSelect={(id) => { setActive(id); onCloseMobile?.(); }} onDelete={deleteChat} onPin={togglePin} />
+              onSelect={(id) => { setActive(id); onCloseMobile?.(); }}
+              onRename={doRename} onDuplicate={doDuplicate} onArchive={toggleArchive}
+              onDelete={deleteChat} onPin={togglePin} />
+            <ArchivedSection items={archived} activeChatId={activeChatId}
+              onSelect={(id) => { setActive(id); onCloseMobile?.(); }}
+              onUnarchive={toggleArchive} onDelete={deleteChat} />
 
-            {pinned.length === 0 && regular.length === 0 && (
+            {pinned.length === 0 && regular.length === 0 && archived.length === 0 && (
               <div className="px-3 py-8 text-sm text-center" style={{ color: "var(--cb-muted)" }}>
                 {query ? "No matches." : "No chats yet. Start a new one."}
               </div>
@@ -259,7 +283,7 @@ export default function Sidebar({ mobileOpen, onCloseMobile }) {
   return content;
 }
 
-function ChatSection({ title, items, activeChatId, onSelect, onDelete, onPin }) {
+function ChatSection({ title, items, activeChatId, onSelect, onRename, onDuplicate, onArchive, onDelete, onPin }) {
   if (items.length === 0) return null;
   return (
     <>
@@ -273,6 +297,9 @@ function ChatSection({ title, items, activeChatId, onSelect, onDelete, onPin }) 
             chat={c}
             active={c.id === activeChatId}
             onClick={() => onSelect(c.id)}
+            onRename={() => onRename(c)}
+            onDuplicate={() => onDuplicate(c)}
+            onArchive={() => onArchive(c.id)}
             onDelete={() => onDelete(c.id)}
             onPin={() => onPin(c.id)}
           />
@@ -282,7 +309,7 @@ function ChatSection({ title, items, activeChatId, onSelect, onDelete, onPin }) 
   );
 }
 
-function ChatRow({ chat, active, onClick, onDelete, onPin }) {
+function ChatRow({ chat, active, onClick, onRename, onDuplicate, onArchive, onDelete, onPin }) {
   return (
     <motion.div
       layout
@@ -293,7 +320,11 @@ function ChatRow({ chat, active, onClick, onDelete, onPin }) {
       onClick={onClick}
       role="button"
       tabIndex={0}
-      onKeyDown={(e) => (e.key === "Enter" ? onClick() : null)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") onClick();
+        else if (e.key === " ") { e.preventDefault(); onClick(); }
+      }}
+      aria-current={active ? "true" : undefined}
       className="group relative flex items-center gap-1 px-2 py-1.5 rounded-lg cursor-pointer text-sm mb-0.5 transition-colors"
       style={{ background: active ? "var(--cb-surface)" : "transparent" }}
     >
@@ -305,24 +336,76 @@ function ChatRow({ chat, active, onClick, onDelete, onPin }) {
           transition={{ type: "spring", stiffness: 380, damping: 30 }}
         />
       )}
-      <span className="truncate flex-1 pl-1">{chat.title}</span>
-      <button
-        onClick={(e) => { e.stopPropagation(); onPin(); }}
-        className="cb-focus opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-cb-border transition-opacity"
-        title={chat.pinned ? "Unpin" : "Pin"}
-        aria-label={chat.pinned ? "Unpin chat" : "Pin chat"}
-      >
+      <span className="truncate flex-1 pl-1" title={chat.title}>{chat.title}</span>
+      <HoverBtn title={chat.pinned ? "Unpin" : "Pin"} ariaLabel={chat.pinned ? "Unpin chat" : "Pin chat"} onClick={(e) => { e.stopPropagation(); onPin(); }}>
         <Pin size={12} fill={chat.pinned ? "currentColor" : "none"} />
-      </button>
-      <button
-        onClick={(e) => { e.stopPropagation(); onDelete(); }}
-        className="cb-focus opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-cb-border transition-opacity"
-        title="Delete"
-        aria-label="Delete chat"
-      >
+      </HoverBtn>
+      <HoverBtn title="Rename" ariaLabel="Rename chat" onClick={(e) => { e.stopPropagation(); onRename(); }}>
+        <Pencil size={12} />
+      </HoverBtn>
+      <HoverBtn title="Duplicate" ariaLabel="Duplicate chat" onClick={(e) => { e.stopPropagation(); onDuplicate(); }}>
+        <Copy size={12} />
+      </HoverBtn>
+      <HoverBtn title="Archive" ariaLabel="Archive chat" onClick={(e) => { e.stopPropagation(); onArchive(); }}>
+        <Archive size={12} />
+      </HoverBtn>
+      <HoverBtn title="Delete" ariaLabel="Delete chat" onClick={(e) => { e.stopPropagation(); onDelete(); }}>
         <Trash2 size={12} />
-      </button>
+      </HoverBtn>
     </motion.div>
+  );
+}
+
+// Collapsed list of archived chats — unarchive from here.
+function ArchivedSection({ items, activeChatId, onSelect, onUnarchive, onDelete }) {
+  const [open, setOpen] = useState(false);
+  if (items.length === 0) return null;
+  return (
+    <>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="cb-focus mt-3 flex w-full items-center gap-1.5 px-2 pt-2 pb-1 text-[11px] uppercase tracking-wider font-medium"
+        style={{ color: "var(--cb-muted)" }}
+        aria-expanded={open}
+      >
+        <Archive size={11} /> Archived ({items.length})
+        <span className="ml-auto text-[10px] normal-case">{open ? "hide" : "show"}</span>
+      </button>
+      {open && items.map((c) => (
+        <motion.div
+          key={c.id}
+          initial={{ opacity: 0, x: -8 }}
+          animate={{ opacity: 1, x: 0 }}
+          onClick={() => onSelect(c.id)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => { if (e.key === "Enter") onSelect(c.id); }}
+          className="group relative flex items-center gap-1 px-2 py-1.5 rounded-lg cursor-pointer text-sm mb-0.5 opacity-70 hover:opacity-100 transition-opacity"
+          style={{ background: c.id === activeChatId ? "var(--cb-surface)" : "transparent" }}
+        >
+          <span className="truncate flex-1 pl-1" title={c.title}>{c.title}</span>
+          <HoverBtn title="Unarchive" ariaLabel="Unarchive chat" onClick={(e) => { e.stopPropagation(); onUnarchive(c.id); }}>
+            <ArchiveRestore size={12} />
+          </HoverBtn>
+          <HoverBtn title="Delete" ariaLabel="Delete archived chat" onClick={(e) => { e.stopPropagation(); onDelete(c.id); }}>
+            <Trash2 size={12} />
+          </HoverBtn>
+        </motion.div>
+      ))}
+    </>
+  );
+}
+
+function HoverBtn({ title, ariaLabel, onClick, children }) {
+  return (
+    <button
+      onClick={onClick}
+      className="cb-focus opacity-0 group-hover:opacity-100 focus-visible:opacity-100 p-1 rounded hover:bg-cb-border transition-opacity"
+      title={title}
+      aria-label={ariaLabel}
+    >
+      {children}
+    </button>
   );
 }
 

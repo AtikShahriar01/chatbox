@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { useEffect, useState } from "react";
 import {
   X, Wand2, Loader2, Copy, Check, RefreshCw, PlusCircle, Sparkles,
-  MessageSquarePlus, ListPlus, Info, AlertCircle, Pencil,
+  MessageSquarePlus, ListPlus, Info, AlertCircle, Pencil, Bookmark,
 } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { callModel } from "@/lib/agents";
@@ -40,6 +40,7 @@ export default function PromptBuilderModal({ open, onClose }) {
   const apiModel = useStore((s) => s.apiModel);
   const pushToast = useStore((s) => s.pushToast);
   const setChatInputDraft = useStore((s) => s.setChatInputDraft);
+  const addPrompt = useStore((s) => s.addPrompt);
 
   const [want, setWant] = useState("");
   const [busy, setBusy] = useState(false);
@@ -204,6 +205,17 @@ export default function PromptBuilderModal({ open, onClose }) {
                           className="cb-focus inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px]"
                           style={{ color: "var(--cb-muted)", background: "var(--cb-bg)" }}>
                           <Pencil size={9} /> Edit
+                        </button>
+                        <button
+                          onClick={() => {
+                            const name = window.prompt("Save prompt as", result.goal ? String(result.goal).slice(0, 40) : "Prompt");
+                            if (name && name.trim()) addPrompt(name.trim(), editBuf || result.prompt);
+                          }}
+                          className="cb-focus inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px]"
+                          style={{ color: "var(--cb-muted)", background: "var(--cb-bg)" }}
+                          title="Save to the library — then type / in the chat input to reuse it"
+                        >
+                          <Bookmark size={9} /> Save
                         </button>
                         <button
                           onClick={() => { setChatInputDraft(result.prompt); onClose(); pushToast({ type: "success", message: "Prompt inserted into chat input." }); }}

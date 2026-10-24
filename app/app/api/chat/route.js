@@ -10,6 +10,8 @@ import {
   buildGoogleRequest,
   buildOllamaRequest,
   buildCohereRequest,
+  nativeJSONToOpenAI,
+  textFromSSEFrames,
 } from "../../../lib/providers";
 import { guard, providerUrlGuard } from "../../../lib/guard";
 import { requireSession } from "../../../lib/session";
@@ -170,6 +172,34 @@ export async function POST(req) {
     return new Response(scrubKey(text) || `Upstream error ${upstream.status}`, {
       status: upstream.status || 500,
       headers: { "Content-Type": upstream.headers.get("content-type") || "text/plain" },
+    });
+  }
+
+  // Non-streaming call (agent engine / classifyTask / compileFinal): answer a
+  // plain JSON completion in the OpenAI shape so callModel() can res.json()
+  // uniformly across all providers. Native adapters answer provider-specific
+  // JSON; a misbehaving provider may still answer SSE frames — salvage those.
+  if (!stream) {
+    const raw = await upstream.text();
+    let out;
+    try {
+      const data = JSON.parse(raw);
+      out = request.isOpenAIFormat ? data : nativeJSONToOpenAI(provider, data);
+    } catch {
+      const salvaged = textFromSSEFrames(raw);
+      if (!salvaged.content && !salvaged.reasoning) {
+        return new Response(scrubKey(String(raw).slice(0, 500)) || `Upstream returned invalid JSON (${upstream.status})`, { status: 502 });
+      }
+      out = {
+        choices: [{
+          message: { role: "assistant", content: salvaged.content, ...(salvaged.reasoning ? { reasoning_content: salvaged.reasoning } : {}) },
+          finish_reason: "stop",
+        }],
+      };
+    }
+    return new Response(JSON.stringify(out), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
     });
   }
 

@@ -19,6 +19,9 @@ agent-bridge/bridge-mode.txt
 agent-bridge/audit.log
 agent-bridge/bridge-stdout.log
 agent-bridge/checkpoints/
+agent-bridge/schedules.json
+agent-bridge/backups/
+agent-bridge/automation-runs/
 .auth/
 
 # ---- local env, caches, scratch ----
@@ -39,3 +42,6 @@ Thumbs.db
 .selftest/itest/
 .selftest/e2e-ide/
 .selftest/probe-dir/
+
+# ---- separate repos / profiles (own git, not part of this repo) ----
+github-profile/

@@ -12,6 +12,7 @@ import {
   GitBranch, CheckCircle2, XCircle, Loader2, ArrowRight, Package,
 } from "lucide-react";
 import { bridgeStatus, pc } from "@/lib/pc";
+
 import { useIde, TASK_STATUS } from "@/lib/ide-store";
 import { useStore } from "@/lib/store";
 import { SkeletonList } from "../platform/States";
@@ -29,11 +30,15 @@ export default function Dashboard() {
   const [agent, setAgent] = useState(null);
   const [info, setInfo] = useState(null);
   const [git, setGit] = useState(null);
+  const [automation, setAutomation] = useState([]);
   const store = useStore();
 
   useEffect(() => {
     let alive = true;
     (async () => {
+      const r = await pc("/automation/results").catch(() => null);
+      if (!alive) return;
+      setAutomation(r?.ok ? r.results || [] : []);
       const s = await bridgeStatus();
       if (!alive) return;
       setAgent(s);
@@ -52,6 +57,17 @@ export default function Dashboard() {
   const changed = (git?.stdout || "").split("\n").filter((l) => l.trim() && !l.startsWith("##")).length;
   const runningTask = tasks.find((t) => ["running", "planning", "testing", "fixing"].includes(t.status));
   const recent = tasks.slice(0, 5);
+  // Response ratings (👍/👎 stored on each assistant message by the chat UI)
+  const rated = (store.chats || []).reduce(
+    (acc, c) => {
+      for (const msg of c.messages || []) {
+        if (msg.feedback === "up") acc.up += 1;
+        else if (msg.feedback === "down") acc.down += 1;
+      }
+      return acc;
+    },
+    { up: 0, down: 0 }
+  );
   const alerts = [];
   if (pending.length) alerts.push({ text: `${pending.length} approval${pending.length > 1 ? "s" : ""} waiting`, risk: "high", tab: "agent" });
   if (!online) alerts.push({ text: "Local Agent offline — start agent-bridge/server.js", risk: "medium", tab: null });
@@ -81,6 +97,11 @@ export default function Dashboard() {
         <p className="text-[12.5px]" style={{ color: "var(--txt-dim)" }}>
           {online ? "Local Agent connected — your PC is ready for tasks." : "Local Agent is offline. Start agent-bridge to enable PC tasks."}
         </p>
+        {(rated.up > 0 || rated.down > 0) && (
+          <p className="mt-1 text-[11.5px]" style={{ color: "var(--txt-faint)" }}>
+            Reply ratings: 👍 {rated.up} · 👎 {rated.down} — rate any reply with the thumbs under it.
+          </p>
+        )}
       </div>
 
       {/* status cards */}
@@ -126,6 +147,29 @@ export default function Dashboard() {
           </Link>
         ))}
       </div>
+
+      {/* automation results (bridge-side scheduler — runs even with the browser closed) */}
+      {automation.length > 0 && (
+        <section className="rounded-2xl border" style={{ borderColor: "var(--border)", background: "var(--panel-bg)" }}>
+          <header className="flex items-center gap-2 border-b px-4 py-2.5" style={{ borderColor: "var(--border)" }}>
+            <ListChecks size={13} className="text-[var(--accent)]" />
+            <h2 className="text-[12.5px] font-semibold">Automation results</h2>
+            <span className="ml-auto text-[10.5px]" style={{ color: "var(--txt-dim)" }}>ran by the bridge — browser was closed</span>
+          </header>
+          <div className="max-h-48 overflow-auto px-4 py-2">
+            {automation.map((r) => (
+              <details key={r.id} className="border-b py-1.5 text-[11.5px] last:border-0" style={{ borderColor: "var(--border)" }}>
+                <summary className="flex cursor-pointer items-center gap-2">
+                  <span className="shrink-0 font-mono text-[10px]" style={{ color: "var(--txt-faint)" }}>{r.at ? new Date(r.at).toLocaleString() : r.id}</span>
+                  <span className="min-w-0 flex-1 truncate" style={{ color: /ERROR/i.test(r.preview || "") ? "var(--err)" : "var(--txt)" }}>{r.preview || r.file}</span>
+                  <span className="shrink-0 text-[10px]" style={{ color: "var(--txt-dim)" }}>{(r.bytes / 1024).toFixed(1)} KB</span>
+                </summary>
+                <AutomationResult id={r.id} />
+              </details>
+            ))}
+          </div>
+        </section>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-2">
         {/* recent tasks */}
@@ -173,4 +217,16 @@ export default function Dashboard() {
       </div>
     </div>
   );
+}
+
+// Full content of one automation result (lazy — only when expanded).
+function AutomationResult({ id }) {
+  const [content, setContent] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    pc("/automation/result", { id }).then((r) => { if (alive) setContent(r?.ok ? r.content : r?.error || "failed to load"); }).catch(() => alive && setContent("failed to load"));
+    return () => { alive = false; };
+  }, [id]);
+  if (content == null) return <p className="py-2 text-[11px]" style={{ color: "var(--txt-dim)" }}>loading…</p>;
+  return <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-black/30 p-2 text-[10.5px]">{content}</pre>;
 }

@@ -1,7 +1,8 @@
 // Anthropic Claude native provider.
 // Endpoint: POST {baseUrl}/v1/messages
 // Headers:  x-api-key, anthropic-version: 2023-06-01, content-type
-// Body:     { model, system, messages: [{role, content: [{type:"text",text}]}], max_tokens, temperature, stream: true }
+// Body:     { model, system, messages: [{role, content: [{type:"text",text}]}], max_tokens, temperature, stream }
+//           stream:true answers SSE; stream:false answers a JSON message object.
 // Stream:   SSE with typed events:
 //   message_start, content_block_start, content_block_delta (text_delta / thinking_delta / input_json_delta),
 //   content_block_stop, message_delta (stop_reason, usage), message_stop, error, ping
@@ -32,7 +33,7 @@ export function buildAnthropicRequest({ model, messages, systemPrompt, temperatu
       messages: cleanedMessages,
       max_tokens: max_tokens || 4096,
       temperature: typeof temperature === "number" ? temperature : 0.7,
-      stream: true,
+      stream: !!stream,
     },
     translate: parseAnthropicSSE,
   };

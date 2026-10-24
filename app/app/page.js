@@ -22,6 +22,8 @@ import { Menu } from "lucide-react";
 import ViewSwitcher from "@/components/platform/ViewSwitcher";
 import CodeOutputWindow from "@/components/chat/CodeOutputWindow";
 import TodoPanel from "@/components/TodoPanel";
+import { startScheduler } from "@/lib/scheduler";
+import { migrateStoreImages } from "@/lib/image-store";
 
 // Heavy views load on first visit only, client-side, with a branded loader.
 const IdeLayout = dynamic(() => import("@/components/ide/IdeLayout"), {
@@ -68,6 +70,10 @@ export default function Home() {
     useStore.persist.rehydrate();
     useUi.persist.rehydrate();
     setReady(true);
+    // Move any inline base64 images from localStorage into IndexedDB (quota!).
+    migrateStoreImages(useStore);
+    // Time-based automations (Settings → Scheduler) — ticks only while the app runs.
+    startScheduler();
   }, []);
 
   // Mount a heavy view the first time it is opened; keep it alive afterwards.
@@ -83,6 +89,10 @@ export default function Home() {
         if (paletteOpen) setPaletteOpen(false);
         else if (settingsOpen) setSettingsOpen(false);
         else if (mobileOpen) setMobileOpen(false);
+        else if (view === "chat") document.dispatchEvent(new CustomEvent("cb:stop-gen"));
+      } else if (isMod && e.key.toLowerCase() === "i" && view === "chat") {
+        e.preventDefault();
+        document.dispatchEvent(new CustomEvent("cb:focus-input"));
       } else if (isMod && e.key.toLowerCase() === "k" && view === "chat") {
         e.preventDefault();
         setPaletteOpen(!paletteOpen);
