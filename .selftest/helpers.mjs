@@ -8,7 +8,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 export const WS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-export const APP = "http://localhost:3000";
+export const APP = "http://127.0.0.1:3000";
 export const HDR = { "Content-Type": "application/json", "x-chatbox-client": "chatbox-web-1" };
 
 // ---------------------------------------------------------------- suite ----

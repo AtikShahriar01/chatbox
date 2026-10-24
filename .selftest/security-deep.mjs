@@ -52,7 +52,7 @@ const demo = freshDir(path.join(WS, ".selftest", "sec-demo2"));
   s.record("AUTH-BYPASS", "session via custom header (not cookie) → 401", r.status === 401, `status ${r.status}`);
   r = await api("/api/auth", { cookie: "chatbox_session=" + Date.now() + ".0." + "0".repeat(64) });
   s.record("AUTH-BYPASS", "/api/auth reports authenticated:false for forged cookie", r.json()?.authenticated === false);
-  r = await api("/api/pc", { method: "POST", body: { op: "status" }, headers: { ...HDR, Origin: "http://localhost:3000" } });
+  r = await api("/api/pc", { method: "POST", body: { op: "status" }, headers: { ...HDR, Origin: "http://127.0.0.1:3000" } });
   s.record("AUTH-BYPASS", "no cookie at all → 401", r.status === 401, `status ${r.status}`);
 }
 
@@ -136,7 +136,7 @@ const demo = freshDir(path.join(WS, ".selftest", "sec-demo2"));
 {
   let r = await api("/api/pc", { method: "POST", cookie: COOKIE, headers: { "Content-Type": "application/json", Origin: "http://evil.example.com" }, body: { op: "status" }, bare: true });
   s.record("CSRF", "cross-site Origin (valid cookie+client header) → 403", r.status === 403, `status ${r.status}`);
-  r = await api("/api/pc", { method: "POST", cookie: COOKIE, headers: { "Content-Type": "application/json", Origin: "http://localhost:3000" }, body: { op: "status" }, bare: true });
+  r = await api("/api/pc", { method: "POST", cookie: COOKIE, headers: { "Content-Type": "application/json", Origin: "http://127.0.0.1:3000" }, body: { op: "status" }, bare: true });
   s.record("CSRF", "simple form POST without client header → 403", r.status === 403, `status ${r.status}`);
   r = await api("/api/chat", { method: "POST", body: "{}", headers: { "Content-Type": "text/plain", Origin: "null" }, cookie: COOKIE, bare: true });
   s.record("CSRF", "text/plain no-cors style POST (Origin null) → 403", r.status === 403, `status ${r.status}`);

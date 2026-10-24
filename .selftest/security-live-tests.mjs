@@ -31,7 +31,7 @@ const HDR = { "Content-Type": "application/json", "x-chatbox-client": "chatbox-w
 let COOKIE = "";
 
 const post = (p, body, extra = {}) =>
-  fetch("http://localhost:3000" + p, {
+  fetch("http://127.0.0.1:3000" + p, {
     method: "POST",
     headers: { ...HDR, ...extra.headers, ...(COOKIE ? { Cookie: COOKIE } : {}) },
     body: typeof body === "string" ? body : JSON.stringify(body),
@@ -62,7 +62,7 @@ const authed = fs.existsSync(AUTH_DIR + "\\auth.json");
   // ---------- session bootstrap ----------
   if (!authed) {
     const pin = String(1000 + Math.floor(Math.random() * 9000));
-    const r = await fetch("http://localhost:3000/api/auth", {
+    const r = await fetch("http://127.0.0.1:3000/api/auth", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "register", pin, name: "Security Tests" }),
     });
@@ -81,11 +81,11 @@ const authed = fs.existsSync(AUTH_DIR + "\\auth.json");
   }
 
   // ---------- AUTH: unauthenticated request must fail ----------
-  let r = await fetch("http://localhost:3000/api/pc", { method: "POST", headers: { "Content-Type": "application/json", "x-chatbox-client": "chatbox-web-1" }, body: JSON.stringify({ op: "status" }) });
+  let r = await fetch("http://127.0.0.1:3000/api/pc", { method: "POST", headers: { "Content-Type": "application/json", "x-chatbox-client": "chatbox-web-1" }, body: JSON.stringify({ op: "status" }) });
   record("AUTH", "API without session cookie → 401", r.status === 401, `status ${r.status}`);
-  r = await fetch("http://localhost:3000/api/chat", { method: "POST", headers: { "Content-Type": "application/json", "x-chatbox-client": "chatbox-web-1" }, body: JSON.stringify({}) });
+  r = await fetch("http://127.0.0.1:3000/api/chat", { method: "POST", headers: { "Content-Type": "application/json", "x-chatbox-client": "chatbox-web-1" }, body: JSON.stringify({}) });
   record("AUTH", "chat without session → 401", r.status === 401, `status ${r.status}`);
-  r = await fetch("http://localhost:3000/", { redirect: "manual" });
+  r = await fetch("http://127.0.0.1:3000/", { redirect: "manual" });
   record("AUTH", "unauthenticated page visit → redirect /login", r.status === 307 || r.status === 302, `status ${r.status} → ${r.headers.get("location") || "-"}`);
   if (!COOKIE) { console.log("FATAL: no session — cannot continue authenticated tests"); process.exit(1); }
 
@@ -95,7 +95,7 @@ const authed = fs.existsSync(AUTH_DIR + "\\auth.json");
   await pc("/workspace", { path: demo });
 
   // ---------- L7: client header ----------
-  r = await fetch("http://localhost:3000/api/pc", { method: "POST", headers: { "Content-Type": "application/json", Cookie: COOKIE }, body: JSON.stringify({ op: "status" }) });
+  r = await fetch("http://127.0.0.1:3000/api/pc", { method: "POST", headers: { "Content-Type": "application/json", Cookie: COOKIE }, body: JSON.stringify({ op: "status" }) });
   record("L7", "cross-site request WITHOUT client header", r.status === 403, `status ${r.status} (expect 403)`);
   r = await pc("status");
   record("L7", "legit request WITH client header", r.status === 200 && JSON.parse(r.text).ok, `status ${r.status}`);
@@ -154,8 +154,8 @@ const authed = fs.existsSync(AUTH_DIR + "\\auth.json");
   record("L16", "action audited", audit.some((l) => l.includes("EXEC") && l.includes("echo sk-FAKE")), "audit.log has the EXEC entry");
 
   // ---------- L17: monaco local loader ----------
-  const loader = await fetch("http://localhost:3000/monaco-vscode/loader.js");
-  const page = await fetch("http://localhost:3000/", { headers: { Cookie: COOKIE } });
+  const loader = await fetch("http://127.0.0.1:3000/monaco-vscode/loader.js");
+  const page = await fetch("http://127.0.0.1:3000/", { headers: { Cookie: COOKIE } });
   const pageHtml = await page.text();
   record("L17", "monaco served locally, no CDN", loader.status === 200 && !/jsdelivr|unpkg|cdnjs/.test(pageHtml), `loader.js ${loader.status}`);
 

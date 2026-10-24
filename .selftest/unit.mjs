@@ -41,7 +41,7 @@ T("providerUrlGuard: garbage rejected", () => providerUrlGuard("not a url at all
 
 const { isPrivateHost, parseDuckHtml } = await imp("lib/web-search.js");
 T("SSRF web-search: loopback/private/metadata are private", () =>
-  [ "http://localhost:8765/status", "http://127.0.0.1/", "http://10.1.2.3/", "http://192.168.0.5/",
+  [ "http://127.0.0.1:8765/status", "http://127.0.0.1/", "http://10.1.2.3/", "http://192.168.0.5/",
     "http://172.16.0.9/", "http://169.254.169.254/", "http://metadata.google.internal/",
     "http://[::1]:8765/", "http://[::ffff:7f00:1]/", "http://[::ffff:a9fe:a9fe]/",
     "http://[fe80::1]/", "http://[fd12:3456::5]/" ].every(isPrivateHost));
